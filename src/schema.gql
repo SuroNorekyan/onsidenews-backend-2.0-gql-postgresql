@@ -1,0 +1,49 @@
+# ------------------------------------------------------
+# THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
+# ------------------------------------------------------
+
+input CreatePostInput {
+  authorId: Float!
+  content: String!
+  imageUrl: String
+  isPublished: Boolean! = false
+  tags: [String!]!
+  title: String!
+}
+
+"""
+A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
+"""
+scalar DateTime
+
+type HelloResponse {
+  message: String!
+}
+
+type Mutation {
+  createPost(input: CreatePostInput!): Post!
+}
+
+type Post {
+  authorId: Float!
+  content: String!
+  createdAt: DateTime!
+  id: ID!
+  imageUrl: String
+  isPublished: Boolean!
+  tags: [String!]!
+  title: String!
+  translated: Translated
+  updatedAt: DateTime!
+}
+
+type Query {
+  hello: HelloResponse!
+  post(id: Int!): Post!
+  posts: [Post!]!
+}
+
+type Translated {
+  en: String
+  ru: String
+}
