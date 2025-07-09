@@ -2,6 +2,20 @@
 # THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
 # ------------------------------------------------------
 
+type Comment {
+  commentId: ID!
+  createdAt: DateTime!
+  post: Post!
+  text: String!
+  user: User!
+}
+
+input CreateCommentInput {
+  postId: Int!
+  text: String!
+  userId: Int!
+}
+
 input CreatePostInput {
   authorId: Float!
   content: String!
@@ -11,39 +25,96 @@ input CreatePostInput {
   title: String!
 }
 
+input CreateUserInput {
+  dateOfBirth: String!
+  email: String!
+  password: String!
+  profilePictureUrl: String
+  role: UserRole! = DEFAULT
+  username: String!
+}
+
 """
 A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
 """
 scalar DateTime
 
-type HelloResponse {
-  message: String!
-}
-
 type Mutation {
+  createComment(input: CreateCommentInput!): Comment!
   createPost(input: CreatePostInput!): Post!
+  createUser(input: CreateUserInput!): User!
+  deleteUser(id: Int!): Boolean!
+  likePost(postId: Int!, userId: Int!): Post!
+  updateUser(input: UpdateUserInput!): User!
 }
 
 type Post {
   authorId: Float!
+  comments: [Comment!]
   content: String!
   createdAt: DateTime!
-  id: ID!
   imageUrl: String
   isPublished: Boolean!
+  likedBy: [User!]!
+  postId: ID!
   tags: [String!]!
   title: String!
   translated: Translated
   updatedAt: DateTime!
+  user: User!
 }
 
 type Query {
-  hello: HelloResponse!
+  commentsByPost(postId: Int!): [Comment!]!
+  commentsByUser(userId: Int!): [Comment!]!
   post(id: Int!): Post!
   posts: [Post!]!
+  user(id: Int!): User!
+  users(filter: UserFilterInput): [User!]!
+}
+
+enum SortOrder {
+  ASC
+  DESC
 }
 
 type Translated {
   en: String
   ru: String
+}
+
+input UpdateUserInput {
+  dateOfBirth: String
+  email: String
+  id: Float!
+  password: String
+  profilePictureUrl: String
+  role: UserRole = DEFAULT
+  username: String
+}
+
+type User {
+  createdAt: DateTime!
+  dateOfBirth: String!
+  email: String!
+  password: String!
+  posts: [Post!]
+  profilePictureUrl: String
+  role: String!
+  updatedAt: DateTime!
+  userId: ID!
+  username: String!
+}
+
+input UserFilterInput {
+  role: String
+  sortByCreatedAt: SortOrder
+  sortByDateOfBirth: SortOrder
+  sortByUsername: SortOrder
+  username: String
+}
+
+enum UserRole {
+  ADMIN
+  DEFAULT
 }

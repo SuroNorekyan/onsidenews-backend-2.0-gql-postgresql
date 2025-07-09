@@ -3,8 +3,9 @@ import { GraphQLModule } from '@nestjs/graphql';
 import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { join } from 'path';
-import { HelloModule } from './hello/hello.module';
 import { PostsModule } from './posts/posts.module';
+import { UsersModule } from './users/users.module';
+import { CommentsModule } from './comments/comments.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { PostsModule } from './posts/posts.module';
       autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
       sortSchema: true,
       context: ({ req }) => ({ req }),
+      playground: true,
     }),
     TypeOrmModule.forRoot({
       type: 'postgres',
@@ -24,8 +26,9 @@ import { PostsModule } from './posts/posts.module';
       entities: [__dirname + '/**/*.entity.{ts,js}'],
       synchronize: true,
     }),
-    HelloModule,
     PostsModule,
+    UsersModule,
+    CommentsModule,
   ],
 })
 export class AppModule {}

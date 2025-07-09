@@ -3,18 +3,23 @@ import {
   Column,
   Entity,
   ManyToOne,
+  OneToMany,
+  ManyToMany,
   PrimaryGeneratedColumn,
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { User } from 'src/users/user-entities/user.entity';
 import { Translated } from '../dto/translated.type';
+import { JoinTable } from 'typeorm';
+import { Comment } from 'src/comments/entities/comment.entity';
 
 @ObjectType()
 @Entity()
 export class Post {
   @Field(() => ID)
   @PrimaryGeneratedColumn()
-  id: number;
+  postId: number;
 
   @Field()
   @Column()
@@ -51,5 +56,17 @@ export class Post {
   @Field()
   @UpdateDateColumn()
   updatedAt: Date;
-}
 
+  @OneToMany(() => Comment, (comment) => comment.post, { cascade: true })
+  @Field(() => [Comment], { nullable: true })
+  comments: Comment[];
+
+  @ManyToOne(() => User, (user) => user.posts, { onDelete: 'CASCADE' })
+  @Field(() => User)
+  user: User;
+
+  @ManyToMany(() => User)
+  @JoinTable()
+  @Field(() => [User])
+  likedBy: User[];
+}
