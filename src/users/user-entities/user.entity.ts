@@ -1,3 +1,4 @@
+//src/users/user-entities/user.entity.ts
 import { ObjectType, Field, ID } from '@nestjs/graphql';
 import {
   Entity,
@@ -55,4 +56,12 @@ export class User {
   @OneToMany(() => Post, (post) => post.user)
   @Field(() => [Post], { nullable: true })
   posts: Post[];
+
+  @Field({ nullable: true })
+  @Column({ nullable: true })
+  twoFactorSecret?: string;
+
+  @Field()
+  @Column({ default: false })
+  isTwoFactorEnabled: boolean;
 }

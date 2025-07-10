@@ -1,3 +1,4 @@
+//src/posts/entities/post.entity.ts
 import { ObjectType, Field, ID } from '@nestjs/graphql';
 import {
   Column,

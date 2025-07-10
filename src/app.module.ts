@@ -6,15 +6,30 @@ import { join } from 'path';
 import { PostsModule } from './posts/posts.module';
 import { UsersModule } from './users/users.module';
 import { CommentsModule } from './comments/comments.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
     GraphQLModule.forRoot<ApolloDriverConfig>({
-      driver: ApolloDriver, // ✅ REQUIRED for NestJS v10+
+      driver: ApolloDriver,
       autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
       sortSchema: true,
-      context: ({ req }) => ({ req }),
       playground: true,
+      context: (ctx) => {
+        const req = ctx.req || ctx.request;
+        const res = ctx.res || ctx.response;
+        if (req && typeof req.logIn !== 'function') {
+          req.logIn = function () {
+            console.log('✅ Patched req.logIn in GraphQL context');
+            return Promise.resolve();
+          };
+        }
+        console.log('🟢 GraphQL context created', {
+          hasLogIn: !!req?.logIn,
+          hasUser: !!req?.user,
+        });
+        return { req, res };
+      },
     }),
     TypeOrmModule.forRoot({
       type: 'postgres',
@@ -29,6 +44,7 @@ import { CommentsModule } from './comments/comments.module';
     PostsModule,
     UsersModule,
     CommentsModule,
+    AuthModule,
   ],
 })
 export class AppModule {}

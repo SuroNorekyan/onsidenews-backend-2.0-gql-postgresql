@@ -1,3 +1,4 @@
+//src/posts/dto/create-post.input.ts
 import { InputType, Field } from '@nestjs/graphql';
 
 @InputType()
@@ -16,8 +17,5 @@ export class CreatePostInput {
 
   @Field({ defaultValue: false })
   isPublished: boolean;
-
-  @Field()
-  authorId: number;
 }
 

@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { CommentsResolver } from './comments.resolver';
+import { CommentsResolver } from '../comments.resolver';
 
 describe('CommentsResolver', () => {
   let resolver: CommentsResolver;

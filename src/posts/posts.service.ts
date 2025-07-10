@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { CreatePostInput } from './dto/create-post.input';
 import { Post } from './entities/post.entity';
 import { User } from 'src/users/user-entities/user.entity';
+import { UpdatePostInput } from './dto/update-post.input';
 
 @Injectable()
 export class PostsService {
@@ -18,6 +19,16 @@ export class PostsService {
   async create(createPostInput: CreatePostInput): Promise<Post> {
     const post = this.postRepository.create(createPostInput);
     return this.postRepository.save(post);
+  }
+
+  async update(id: number, input: UpdatePostInput): Promise<Post | null> {
+    await this.postRepository.update(id, input);
+    return this.findOne(id);
+  }
+
+  async remove(id: number): Promise<boolean> {
+    await this.postRepository.delete(id);
+    return true;
   }
 
   async findAll(): Promise<Post[]> {

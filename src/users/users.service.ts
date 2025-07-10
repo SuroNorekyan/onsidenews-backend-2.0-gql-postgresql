@@ -1,3 +1,4 @@
+//src/users/users.service.ts
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -16,6 +17,13 @@ export class UsersService {
   create(createUserInput: CreateUserInput): Promise<User> {
     const user = this.userRepository.create(createUserInput);
     return this.userRepository.save(user);
+  }
+
+  async findByUsername(username: string): Promise<User | null> {
+    return this.userRepository.findOne({
+      where: { username },
+      relations: ['comments', 'posts'],
+    });
   }
 
   async findAll(filter?: UserFilterInput): Promise<User[]> {
