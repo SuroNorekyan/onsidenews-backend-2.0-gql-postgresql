@@ -70,4 +70,16 @@ export class Post {
   @JoinTable()
   @Field(() => [User])
   likedBy: User[];
+
+  @Field()
+  @Column({ default: 0 })
+  viewsCount: number;
+
+  @Column({
+    name: 'search_vector',
+    type: 'tsvector',
+    nullable: true,
+    select: false,
+  })
+  searchVector?: string;
 }

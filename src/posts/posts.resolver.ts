@@ -1,15 +1,15 @@
 // src/posts/post.resolver.ts
-import { Resolver, Query, Mutation, Args, Int } from '@nestjs/graphql';
+import { Resolver, Query, Mutation, Args, Int, Context } from '@nestjs/graphql';
 import { CreatePostInput } from './dto/create-post.input';
 import { Post } from './entities/post.entity';
 import { PostsService } from './posts.service';
-import { FilterPostsInput } from './dto/filter-posts.input';
 import { UseGuards } from '@nestjs/common';
 import { Roles } from 'src/auth/guards/roles.decorator';
 import { RolesGuard } from 'src/auth/guards/roles.guard';
 import { JwtAuthGuard } from 'src/auth/jwt/jwt.guard';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { UpdatePostInput } from './dto/update-post.input';
+import { FilterPostsInput } from './dto/filter-posts.input';
 
 @Resolver(() => Post)
 export class PostsResolver {
@@ -58,14 +58,24 @@ export class PostsResolver {
   }
 
   @Query(() => Post)
-  post(@Args('id', { type: () => Int }) id: number): Promise<Post | null> {
+  async post(
+    @Args('id', { type: () => Int }) id: number,
+    @Context() ctx: { req?: { ip?: string } },
+  ): Promise<Post | null> {
+    const ip = ctx.req?.ip || 'unknown';
+    await this.postsService.registerView(id, ip);
     return this.postsService.findOne(id);
   }
 
-  // @Query(() => [Post])
-  // async findAllPosts(
-  //   @Args('filter', { nullable: true }) filter: FilterPostsInput,
-  // ) {
-  //   return this.postsService.findAll(filter);
-  // }
+  @Query(() => [Post])
+  async searchPosts(
+    @Args('filter', { nullable: true }) filter?: FilterPostsInput,
+  ): Promise<Post[]> {
+    return this.postsService.searchPosts(filter || {});
+  }
+
+  @Query(() => String, { nullable: true })
+  async didYouMean(@Args('query') query: string): Promise<string | null> {
+    return this.postsService.getDidYouMeanSuggestion(query);
+  }
 }

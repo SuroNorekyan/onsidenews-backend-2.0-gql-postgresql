@@ -43,6 +43,17 @@ A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date
 """
 scalar DateTime
 
+input FilterPostsInput {
+  authorName: String
+  containsText: String
+  sortByCreatedAt: SortOrder
+  sortByLikes: SortOrder
+  sortByRelevance: SortOrder
+  sortByTitle: SortOrder
+  sortByViews: SortOrder
+  title: String
+}
+
 input LoginInput {
   password: String!
   twoFactorCode: String
@@ -76,13 +87,16 @@ type Post {
   translated: Translated
   updatedAt: DateTime!
   user: User!
+  viewsCount: Float!
 }
 
 type Query {
   commentsByPost(postId: Int!): [Comment!]!
   commentsByUser(userId: Int!): [Comment!]!
+  didYouMean(query: String!): String
   post(id: Int!): Post!
   posts: [Post!]!
+  searchPosts(filter: FilterPostsInput): [Post!]!
   user(id: Int!): User!
   users(filter: UserFilterInput): [User!]!
 }

@@ -7,6 +7,7 @@ import { PostsModule } from './posts/posts.module';
 import { UsersModule } from './users/users.module';
 import { CommentsModule } from './comments/comments.module';
 import { AuthModule } from './auth/auth.module';
+import { TranslationService } from './common/services/translation.service';
 
 @Module({
   imports: [
@@ -20,14 +21,9 @@ import { AuthModule } from './auth/auth.module';
         const res = ctx.res || ctx.response;
         if (req && typeof req.logIn !== 'function') {
           req.logIn = function () {
-            console.log('✅ Patched req.logIn in GraphQL context');
             return Promise.resolve();
           };
         }
-        console.log('🟢 GraphQL context created', {
-          hasLogIn: !!req?.logIn,
-          hasUser: !!req?.user,
-        });
         return { req, res };
       },
     }),
@@ -46,5 +42,7 @@ import { AuthModule } from './auth/auth.module';
     CommentsModule,
     AuthModule,
   ],
+  providers: [TranslationService],
+  exports: [TranslationService],
 })
 export class AppModule {}

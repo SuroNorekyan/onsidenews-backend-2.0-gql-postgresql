@@ -8,18 +8,23 @@ export class FilterPostsInput {
   title?: string;
 
   @Field({ nullable: true })
-  containsText?: string;
-
-  @Field({ nullable: true })
   authorName?: string;
 
-  // Sorting flags
-  @Field(()=> SortOrder, { nullable: true })
-  sortByCreatedAt?: SortOrder;
-
-  @Field(()=> SortOrder, { nullable: true })
+  @Field(() => SortOrder, { nullable: true })
   sortByTitle?: SortOrder;
 
-  @Field(()=> SortOrder, { nullable: true })
+  @Field(() => SortOrder, { nullable: true })
   sortByLikes?: SortOrder;
+
+  @Field({ nullable: true })
+  containsText?: string;
+
+  @Field(() => SortOrder, { nullable: true })
+  sortByCreatedAt?: SortOrder;
+
+  @Field(() => SortOrder, { nullable: true })
+  sortByViews?: SortOrder;
+
+  @Field(() => SortOrder, { nullable: true })
+  sortByRelevance?: SortOrder;
 }
