@@ -12,6 +12,10 @@ async function bootstrap() {
   );
 
   app.useGlobalPipes(new ValidationPipe());
+  app.enableCors({
+    origin: 'http://localhost:3001', // ✅ frontend port
+    credentials: true, // if you're using cookies / auth
+  });
 
   await app.listen(process.env.PORT ?? 3000);
 }
