@@ -27,4 +27,8 @@ export class FilterPostsInput {
 
   @Field(() => SortOrder, { nullable: true })
   sortByRelevance?: SortOrder;
+
+  // 🔹 NEW: allow filtering only top posts if needed
+  @Field({ nullable: true })
+  isTop?: boolean;
 }

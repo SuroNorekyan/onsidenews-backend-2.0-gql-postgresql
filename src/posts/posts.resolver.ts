@@ -10,6 +10,10 @@ import { JwtAuthGuard } from 'src/auth/jwt/jwt.guard';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { UpdatePostInput } from './dto/update-post.input';
 import { FilterPostsInput } from './dto/filter-posts.input';
+import { PostsPage } from './dto/posts-page.type';
+import { PostsPaginationArgs } from './dto/posts-pagination.args';
+import { SortOrder } from 'src/common/enums/sort-order.enum';
+import { TopPostsPaginationArgs } from './dto/top-posts-pagination.args';
 
 @Resolver(() => Post)
 export class PostsResolver {
@@ -67,6 +71,11 @@ export class PostsResolver {
     return this.postsService.findOne(id);
   }
 
+  @Query(() => PostsPage)
+  postsPaginated(@Args() args: PostsPaginationArgs): Promise<PostsPage> {
+    return this.postsService.getPostsPaginated(args.page, args.pageSize);
+  }
+
   @Query(() => [Post])
   async searchPosts(
     @Args('filter', { nullable: true }) filter?: FilterPostsInput,
@@ -77,5 +86,30 @@ export class PostsResolver {
   @Query(() => String, { nullable: true })
   async didYouMean(@Args('query') query: string): Promise<string | null> {
     return this.postsService.getDidYouMeanSuggestion(query);
+  }
+
+  @Query(() => [Post])
+  async topPosts(
+    @Args('limit', { type: () => Int, defaultValue: 10 }) limit: number,
+    @Args('sortByCreatedAt', { type: () => SortOrder, nullable: true })
+    sortByCreatedAt?: SortOrder,
+  ): Promise<Post[]> {
+    return this.postsService.getTopPosts(
+      limit,
+      sortByCreatedAt ?? SortOrder.DESC,
+    );
+  }
+
+  // 🔹 paginated list for the Top Posts page
+  @Query(() => PostsPage)
+  async topPostsPaginated(
+    @Args() args: TopPostsPaginationArgs,
+  ): Promise<PostsPage> {
+    return this.postsService.getTopPostsPaginated(
+      args.page,
+      args.pageSize,
+      args.sortByCreatedAt,
+      args.sortByViews,
+    );
   }
 }

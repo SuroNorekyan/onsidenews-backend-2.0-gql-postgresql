@@ -8,6 +8,7 @@ import { User } from 'src/users/user-entities/user.entity';
 import { UpdatePostInput } from './dto/update-post.input';
 import { TranslationService } from 'src/common/services/translation.service';
 import { FilterPostsInput } from './dto/filter-posts.input';
+import { SortOrder } from 'src/common/enums/sort-order.enum';
 
 @Injectable()
 export class PostsService {
@@ -99,6 +100,10 @@ export class PostsService {
 
   async searchPosts(filter: FilterPostsInput): Promise<Post[]> {
     const qb = this.postRepository.createQueryBuilder('post');
+
+    if (filter.isTop !== undefined) {
+      qb.andWhere('post.isTop = :isTop', { isTop: filter.isTop });
+    }
 
     if (filter.containsText) {
       const plainQuery = filter.containsText.trim();
@@ -232,5 +237,96 @@ export class PostsService {
     }
 
     return null;
+  }
+
+  async getPostsPaginated(page = 1, pageSize = 12) {
+    const safePage = Math.max(1, page);
+    const safePageSize = Math.min(Math.max(1, pageSize), 100); // hard cap for safety
+    const offset = (safePage - 1) * safePageSize;
+
+    const qb = this.postRepository
+      .createQueryBuilder('post')
+      .leftJoinAndSelect('post.user', 'user')
+      .leftJoinAndSelect('post.comments', 'comments')
+      .orderBy('post.createdAt', 'DESC')
+      .offset(offset)
+      .limit(safePageSize);
+
+    // Ask Postgres to compute total in the same result set
+    qb.select([
+      'post', // selects all post columns (entity selection)
+      'user',
+      'comments',
+    ]);
+    // add raw count column
+    qb.addSelect('COUNT(*) OVER() AS "fullCount"');
+
+    const { entities: items, raw } = await qb.getRawAndEntities();
+    const totalCount = Number(raw[0]?.fullCount ?? 0);
+    const totalPages = Math.max(1, Math.ceil(totalCount / safePageSize));
+
+    return {
+      items,
+      totalCount,
+      page: safePage,
+      pageSize: safePageSize,
+      totalPages,
+    };
+  }
+
+  // 🔹 quick list of top posts for sidebar (limit + sort by createdAt DESC by default)
+  async getTopPosts(
+    limit = 10,
+    sortByCreatedAt: SortOrder = SortOrder.DESC,
+  ): Promise<Post[]> {
+    return this.postRepository.find({
+      where: { isTop: true },
+      order: { createdAt: sortByCreatedAt },
+      take: limit,
+      relations: ['user', 'comments'],
+    });
+  }
+
+  // 🔹 paginated top posts (sort by date and/or views)
+  async getTopPostsPaginated(
+    page = 1,
+    pageSize = 12,
+    sortByCreatedAt?: SortOrder,
+    sortByViews?: SortOrder,
+  ) {
+    const safePage = Math.max(1, page);
+    const safePageSize = Math.min(Math.max(1, pageSize), 100);
+    const offset = (safePage - 1) * safePageSize;
+
+    const qb = this.postRepository
+      .createQueryBuilder('post')
+      .leftJoinAndSelect('post.user', 'user')
+      .leftJoinAndSelect('post.comments', 'comments')
+      .where('post.isTop = :isTop', { isTop: true })
+      .offset(offset)
+      .limit(safePageSize);
+
+    // default primary ordering by createdAt DESC if no explicit sort is given
+    if (!sortByCreatedAt && !sortByViews) {
+      qb.orderBy('post.createdAt', 'DESC');
+    } else {
+      if (sortByCreatedAt) qb.addOrderBy('post.createdAt', sortByCreatedAt);
+      if (sortByViews) qb.addOrderBy('post.viewsCount', sortByViews);
+    }
+
+    qb.select(['post', 'user', 'comments']);
+    qb.addSelect('COUNT(*) OVER() AS "fullCount"');
+
+    const { entities: items, raw } = await qb.getRawAndEntities();
+    const totalCount = Number(raw[0]?.fullCount ?? 0);
+    const totalPages = Math.max(1, Math.ceil(totalCount / safePageSize));
+
+    return {
+      items,
+      totalCount,
+      page: safePage,
+      pageSize: safePageSize,
+      totalPages,
+    };
   }
 }

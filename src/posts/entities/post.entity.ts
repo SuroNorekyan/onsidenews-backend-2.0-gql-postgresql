@@ -42,6 +42,11 @@ export class Post {
   @Column({ default: false })
   isPublished: boolean;
 
+  // 🔹 NEW: mark top posts
+  @Field(() => Boolean)
+  @Column({ default: false })
+  isTop: boolean;
+
   @Field(() => Translated, { nullable: true })
   @Column({ type: 'jsonb', nullable: true })
   translated?: Translated;

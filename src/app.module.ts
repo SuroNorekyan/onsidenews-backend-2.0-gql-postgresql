@@ -8,6 +8,7 @@ import { UsersModule } from './users/users.module';
 import { CommentsModule } from './comments/comments.module';
 import { AuthModule } from './auth/auth.module';
 import { TranslationService } from './common/services/translation.service';
+import './common/enums/sort-order.enum';
 
 @Module({
   imports: [

@@ -7,5 +7,6 @@ export enum SortOrder {
 }
 
 registerEnumType(SortOrder, {
-  name: 'SortOrder',
+  name: 'SortOrder', // 👈 must match the name used in your .graphql queries
+  description: 'Ascending or Descending order',
 });

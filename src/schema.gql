@@ -24,7 +24,7 @@ input CreateCommentInput {
 input CreatePostInput {
   content: String!
   imageUrl: String
-  isPublished: Boolean! = false
+  isTop: Boolean! = false
   tags: [String!]!
   title: String!
 }
@@ -46,6 +46,7 @@ scalar DateTime
 input FilterPostsInput {
   authorName: String
   containsText: String
+  isTop: Boolean
   sortByCreatedAt: SortOrder
   sortByLikes: SortOrder
   sortByRelevance: SortOrder
@@ -80,6 +81,7 @@ type Post {
   createdAt: DateTime!
   imageUrl: String
   isPublished: Boolean!
+  isTop: Boolean!
   likedBy: [User!]!
   postId: ID!
   tags: [String!]!
@@ -90,17 +92,38 @@ type Post {
   viewsCount: Float!
 }
 
+type PostsPage {
+  items: [Post!]!
+  page: Int!
+  pageSize: Int!
+  totalCount: Int!
+  totalPages: Int!
+}
+
 type Query {
   commentsByPost(postId: Int!): [Comment!]!
   commentsByUser(userId: Int!): [Comment!]!
   didYouMean(query: String!): String
   post(id: Int!): Post!
   posts: [Post!]!
+  postsPaginated(page: Int! = 1, pageSize: Int! = 12): PostsPage!
   searchPosts(filter: FilterPostsInput): [Post!]!
+  topPosts(limit: Int! = 10, sortByCreatedAt: SortOrder): [Post!]!
+  topPostsPaginated(
+    page: Int! = 1
+    pageSize: Int! = 12
+
+    """Sort by createdAt"""
+    sortByCreatedAt: SortOrder
+
+    """Sort by viewsCount"""
+    sortByViews: SortOrder
+  ): PostsPage!
   user(id: Int!): User!
   users(filter: UserFilterInput): [User!]!
 }
 
+"""Ascending or Descending order"""
 enum SortOrder {
   ASC
   DESC
@@ -114,7 +137,7 @@ type Translated {
 input UpdatePostInput {
   content: String
   imageUrl: String
-  isPublished: Boolean = false
+  isTop: Boolean = false
   tags: [String!]
   title: String
 }

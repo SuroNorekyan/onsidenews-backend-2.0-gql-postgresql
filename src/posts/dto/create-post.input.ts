@@ -15,7 +15,8 @@ export class CreatePostInput {
   @Field(() => [String])
   tags: string[];
 
+  // 🔹 NEW
   @Field({ defaultValue: false })
-  isPublished: boolean;
+  isTop?: boolean;
 }
 
