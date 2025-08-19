@@ -43,7 +43,8 @@ export class PostsResolver {
       for (const p of preferred) {
         if (p.startsWith('en')) order.push(LanguageCode.EN);
         else if (p.startsWith('ru')) order.push(LanguageCode.RU);
-        else if (p.startsWith('hy') || p.startsWith('am')) order.push(LanguageCode.HY);
+        else if (p.startsWith('hy') || p.startsWith('am'))
+          order.push(LanguageCode.HY);
       }
     }
     // Ensure unique order
@@ -53,12 +54,24 @@ export class PostsResolver {
   private pickContent(
     post: Post,
     ctx: any,
-  ): { language?: LanguageCode; title?: string; content?: string; tags?: string[]; id?: number } {
+  ): {
+    language?: LanguageCode;
+    title?: string;
+    content?: string;
+    tags?: string[];
+    id?: number;
+  } {
     const available = (post.contents || []) as PostContent[];
     const preferred = this.resolvePreferredLanguage(ctx);
     const base = post.baseLanguage ? [post.baseLanguage] : [];
-    const fallback: LanguageCode[] = [LanguageCode.EN, LanguageCode.RU, LanguageCode.HY];
-    const order: LanguageCode[] = Array.from(new Set([...preferred, ...base, ...fallback]));
+    const fallback: LanguageCode[] = [
+      LanguageCode.EN,
+      LanguageCode.RU,
+      LanguageCode.HY,
+    ];
+    const order: LanguageCode[] = Array.from(
+      new Set([...preferred, ...base, ...fallback]),
+    );
 
     for (const lang of order) {
       const found = available.find((c) => c.language === lang);
@@ -120,7 +133,8 @@ export class PostsResolver {
 
   @Query(() => [Post])
   posts(
-    @Args('language', { type: () => LanguageCode, nullable: true }) language?: LanguageCode,
+    @Args('language', { type: () => LanguageCode, nullable: true })
+    language?: LanguageCode,
     @Context() ctx?: any,
   ): Promise<Post[]> {
     if (ctx && language) ctx.req.gqlPreferredLanguage = language;
@@ -130,8 +144,10 @@ export class PostsResolver {
   @Query(() => Post)
   async post(
     @Args('id', { type: () => Int }) id: number,
-    @Args('language', { type: () => LanguageCode, nullable: true }) language: LanguageCode | null,
-    @Context() ctx: { req?: { ip?: string; gqlPreferredLanguage?: LanguageCode } },
+    @Args('language', { type: () => LanguageCode, nullable: true })
+    language: LanguageCode | null,
+    @Context()
+    ctx: { req?: { ip?: string; gqlPreferredLanguage?: LanguageCode } },
   ): Promise<Post | null> {
     const ip = ctx.req?.ip || 'unknown';
     if (language) ctx.req!.gqlPreferredLanguage = language;
@@ -180,25 +196,32 @@ export class PostsResolver {
       args.sortByViews,
     );
   }
+
   @ResolveField(() => LanguageCode, { name: 'servedLanguage', nullable: true })
-  servedLanguage(@Parent() post: Post, @Context() ctx: any): LanguageCode | null {
+  servedLanguage(
+    @Parent() post: Post,
+    @Context() ctx: any,
+  ): LanguageCode | null {
     const { language } = this.pickContent(post, ctx);
-    return language ?? null;
+    return language ?? post.baseLanguage ?? null;
   }
 
   @ResolveField(() => PostContent, { name: 'contentResolved' })
-  contentResolved(@Parent() post: Post, @Context() ctx: any): any {
+  contentResolved(@Parent() post: Post, @Context() ctx: any) {
     const resolved = this.pickContent(post, ctx);
+
+    const language: LanguageCode =
+      resolved.language ?? post.baseLanguage ?? LanguageCode.EN;
+
     return {
       id: resolved.id ?? 0,
-      language: resolved.language ?? null,
+      language,
       title: resolved.title ?? (post as any).title,
       content: resolved.content ?? (post as any).content,
       tags: resolved.tags ?? (post as any).tags ?? [],
     };
   }
 
-  // Override legacy 'content' to return resolved language-aware content
   @ResolveField(() => String, { name: 'content' })
   content(@Parent() post: Post, @Context() ctx: any): string {
     const resolved = this.pickContent(post, ctx);
