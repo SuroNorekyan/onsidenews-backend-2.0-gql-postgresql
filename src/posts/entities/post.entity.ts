@@ -14,6 +14,8 @@ import { User } from 'src/users/user-entities/user.entity';
 import { Translated } from '../dto/translated.type';
 import { JoinTable } from 'typeorm';
 import { Comment } from 'src/comments/entities/comment.entity';
+import { PostContent } from './post-content.entity';
+import { LanguageCode } from 'src/common/enums/language-code.enum';
 
 @ObjectType()
 @Entity()
@@ -38,10 +40,6 @@ export class Post {
   @Column('text', { array: true, default: [] })
   tags: string[];
 
-  @Field(() => Boolean)
-  @Column({ default: false })
-  isPublished: boolean;
-
   // 🔹 NEW: mark top posts
   @Field(() => Boolean)
   @Column({ default: false })
@@ -54,6 +52,11 @@ export class Post {
   @Field()
   @Column()
   authorId: number;
+
+  // Optional default/base language to prefer for this post when resolving content
+  @Field(() => LanguageCode, { nullable: true })
+  @Column({ type: 'enum', enum: LanguageCode, nullable: true })
+  baseLanguage?: LanguageCode | null;
 
   @Field()
   @CreateDateColumn()
@@ -87,4 +90,8 @@ export class Post {
     select: false,
   })
   searchVector?: string;
+
+  @OneToMany(() => PostContent, (pc) => pc.post, { cascade: true })
+  @Field(() => [PostContent], { nullable: true })
+  contents?: PostContent[];
 }

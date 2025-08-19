@@ -1,0 +1,170 @@
+TITLE: Extend existing posts to full multilingual support (HY/RU/EN) without rebuilding from scratch
+
+OWNER: Codex
+PRIORITY: P0
+BRANCH: feature/multilanguage-posts
+TARGET STACK: NestJS + GraphQL + TypeORM + PostgreSQL (existing project)
+SCOPE: src/posts only + necessary migrations and DTOs
+
+GOAL
+Enhance the current posts feature in src/posts to support three languages (Armenian=HY, Russian=RU, English=EN) for title, content (markdown), and tags—without removing or breaking current functionality. Keep the existing createPost mutation working as-is, and extend it to optionally accept multilingual payloads.
+
+IMPORTANT CONTEXT
+- Posts already exist (entities/resolvers/services) and there is an existing GraphQL mutation like:
+  mutation {
+    createPost(input: {
+      title: "lewangoalski."
+      content: "mock..."
+      tags: ["dortmund","german league","asdzxc"]
+      imageUrl: "url"
+      isTop: true
+    }) {
+      postId
+      title
+      tags
+    }
+  }
+- DO NOT rebuild posts “from scratch.” Analyze project files and extend them.
+
+SECURITY / AUTH
+- Admin-only mutations. Use this token for protected requests during testing:
+  Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImFkbWluXzE3NTUyNzQ3MjE0MzQiLCJzdWIiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc1NTU5MTM3NywiZXhwIjoxNzU2MTk2MTc3fQ.wZYBCpzb02kuQ3--Gnw9beHkwhVBxF_XX_3IbHlHQbA
+
+REQUIREMENTS
+
+1) Codebase analysis
+   - Read src/posts (entities, DTOs, resolvers, services, migrations).
+   - Document current GraphQL schema for posts (queries/mutations/inputs) in the change log.
+
+2) Data model extension (non-breaking)
+   - Introduce a new table **PostContent** with fields:
+     - id (PK)
+     - postId (FK → Post)
+     - language enum: HY | RU | EN
+     - title text, content text, tags text[]
+     - createdAt, updatedAt
+     - unique (postId, language)
+   - Keep existing Post fields intact (title/content/tags) for backward compatibility.
+   - Add a `baseLanguage` column on Post (HY|RU|EN) with a default (e.g., EN or derived from initial createPost input).
+
+3) Backfill / migration
+   - Create a TypeORM migration:
+     - Create PostContent (+ enum type) and unique index.
+     - If Post already has title/content/tags, migrate them into PostContent at (postId, baseLanguage).
+     - Keep Post.title/content/tags for now (resolve them from preferred/fallback language in resolvers).
+
+4) GraphQL schema (extend, don’t break)
+   - Keep the **existing createPost(input: ExistingCreatePostInput!)** behavior working with single-language fields.
+   - Extend the input with OPTIONAL multilingual fields:
+     - `baseLanguage?: Language`
+     - `contents?: [CreatePostContentInput!]` (each item: language, title, content, tags)
+   - If `contents` is provided, upsert per-language records into PostContent.
+   - If only legacy title/content/tags are provided (no `contents`), behave exactly as today (write Post fields + mirror into PostContent for baseLanguage).
+   - Add a new query arg `language?: Language` to `post(id:...)` and `posts(...)`:
+     - Resolve `servedLanguage` using preferred language with fallback order:
+       preferred → baseLanguage → EN → RU → HY.
+     - Expose a `contentResolved` field with the chosen language bundle.
+
+   Types (add/extend):
+   - enum Language { HY RU EN }
+   - type Post { postId, imageUrl, isTop, baseLanguage, servedLanguage, contentResolved: PostContent, contents: [PostContent!]! }
+   - type PostContent { id, language, title, content, tags }
+   - input CreatePostContentInput { language: Language!, title: String!, content: String!, tags: [String!]! }
+   - input CreatePostInput (extended): keep existing fields; add optional baseLanguage, contents
+   - input UpdatePostInput (extended): add optional contents: [UpsertPostContentInput!]
+   - input UpsertPostContentInput { language: Language!, title: String, content: String, tags: [String!] }
+
+5) Service / Resolver changes
+   - In createPost:
+     - Support legacy path (single-language) and mirror into PostContent for baseLanguage.
+     - Support new path (contents array) to create PostContent rows for HY/RU/EN as provided.
+   - In updatePost:
+     - Upsert specific languages in PostContent if `contents` present.
+   - In queries:
+     - Implement resolver logic that:
+       - Accepts `language?: Language`
+       - Computes `servedLanguage`
+       - Returns `contentResolved` accordingly.
+     - Keep legacy fields Post.title/content/tags by resolving from `contentResolved` to stay backward-compatible.
+
+6) Tests / verification
+   - After migration and code changes, **create a few mock posts** using the **existing createPost** mutation extended with `contents`.
+   - Also create one post using ONLY legacy fields (no contents) to confirm backward compatibility.
+   - Save the exact mutation payloads + full JSON responses to **./mock-posts.txt**.
+   - Verify queries with and without `language` arg and record responses.
+
+7) Logs / docs
+   - Create **./changes-languageSupport.txt** including:
+     - File-by-file change log (path, purpose, key code decisions).
+     - Summary of schema changes and migration details (including SQL emitted).
+     - Sample GraphQL `curl` commands (with Authorization header) to reproduce.
+     - Notes on fallback behavior and legacy compatibility.
+
+8) Acceptance
+   - Build passes, app runs.
+   - Existing createPost still works with old inputs.
+   - New multilingual path works; `contents` upserts languages.
+   - `post`/`posts` return `servedLanguage` and `contentResolved` correctly with fallback.
+   - Auth guards enforced: mutations require the provided token.
+
+GRAPHQL EXAMPLES (for mock-posts.txt; adjust IDs as returned)
+
+# Legacy-only (compat path)
+mutation LegacyCreate {
+  createPost(input: {
+    title: "Legacy Single-Language Post"
+    content: "Legacy body..."
+    tags: ["legacy","single-lang"]
+    imageUrl: "https://cdn.example.com/legacy.jpg"
+    isTop: false
+    # no contents[] here on purpose
+    baseLanguage: EN
+  }) {
+    postId
+    title
+    tags
+    baseLanguage
+    servedLanguage
+    contentResolved { language title tags }
+  }
+}
+
+# Extended (multilingual path)
+mutation CreateMulti {
+  createPost(input: {
+    baseLanguage: HY
+    imageUrl: "https://cdn.example.com/mc-supercup.jpg"
+    isTop: true
+    # legacy fields may be omitted or filled; contents[] is the source of truth when present
+    contents: [
+      { language: HY, title: "Մանչեսթեր Սիթի՝ Սուպերգավաթի ճանապարհին", content: "# Սիթի\n\n**Ֆոդեն** ...", tags: ["մանչեսթեր սիթի","ֆոդեն","սուպերգավաթ"] },
+      { language: RU, title: "«Манчестер Сити» на пути к Суперкубку", content: "# Сити\n\n**Фоден** ...", tags: ["манчестер сити","фоден","суперкубок"] },
+      { language: EN, title: "Manchester City march toward the Super Cup", content: "# City\n\n**Foden** ...", tags: ["manchester city","foden","super cup"] }
+    ]
+  }) {
+    postId
+    baseLanguage
+    servedLanguage
+    contents { language title }
+    contentResolved { language title tags }
+  }
+}
+
+# Query with preferred language + fallback
+query OnePostInRU {
+  post(id: 1, language: RU) {
+    postId
+    servedLanguage
+    contentResolved { language title content tags }
+  }
+}
+
+HEADERS for all mutations/queries (protected ops):
+  Content-Type: application/json
+  Authorization: Bearer <the provided token>
+
+DELIVERABLES
+- Code changes on branch feature/multilanguage-posts
+- TypeORM migration(s) applied
+- ./mock-posts.txt (inputs + outputs)
+- ./changes-languageSupport.txt (detailed log + curl commands)
