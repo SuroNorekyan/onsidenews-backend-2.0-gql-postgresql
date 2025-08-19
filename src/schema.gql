@@ -22,11 +22,13 @@ input CreateCommentInput {
 }
 
 input CreatePostInput {
-  content: String!
+  baseLanguage: Language
+  content: String
+  contents: [PostContentInput!]
   imageUrl: String
   isTop: Boolean! = false
-  tags: [String!]!
-  title: String!
+  tags: [String!]
+  title: String
 }
 
 input CreateUserInput {
@@ -55,6 +57,12 @@ input FilterPostsInput {
   title: String
 }
 
+enum Language {
+  EN
+  HY
+  RU
+}
+
 input LoginInput {
   password: String!
   twoFactorCode: String
@@ -76,20 +84,40 @@ type Mutation {
 
 type Post {
   authorId: Float!
+  baseLanguage: Language
   comments: [Comment!]
   content: String!
+  contentResolved: PostContent!
+  contents: [PostContent!]
   createdAt: DateTime!
   imageUrl: String
-  isPublished: Boolean!
   isTop: Boolean!
   likedBy: [User!]!
   postId: ID!
+  servedLanguage: Language
   tags: [String!]!
   title: String!
   translated: Translated
   updatedAt: DateTime!
   user: User!
   viewsCount: Float!
+}
+
+type PostContent {
+  content: String!
+  createdAt: DateTime!
+  id: ID!
+  language: Language!
+  tags: [String!]!
+  title: String!
+  updatedAt: DateTime!
+}
+
+input PostContentInput {
+  content: String!
+  language: Language!
+  tags: [String!]!
+  title: String!
 }
 
 type PostsPage {
@@ -104,8 +132,8 @@ type Query {
   commentsByPost(postId: Int!): [Comment!]!
   commentsByUser(userId: Int!): [Comment!]!
   didYouMean(query: String!): String
-  post(id: Int!): Post!
-  posts: [Post!]!
+  post(id: Int!, language: Language): Post!
+  posts(language: Language): [Post!]!
   postsPaginated(page: Int! = 1, pageSize: Int! = 12): PostsPage!
   searchPosts(filter: FilterPostsInput): [Post!]!
   topPosts(limit: Int! = 10, sortByCreatedAt: SortOrder): [Post!]!
@@ -135,9 +163,11 @@ type Translated {
 }
 
 input UpdatePostInput {
+  baseLanguage: Language
   content: String
+  contents: [UpsertPostContentInput!]
   imageUrl: String
-  isTop: Boolean = false
+  isTop: Boolean
   tags: [String!]
   title: String
 }
@@ -152,6 +182,13 @@ input UpdateUserInput {
   role: UserRole = DEFAULT
   twoFactorSecret: String
   username: String
+}
+
+input UpsertPostContentInput {
+  content: String
+  language: Language!
+  tags: [String!]
+  title: String
 }
 
 type User {

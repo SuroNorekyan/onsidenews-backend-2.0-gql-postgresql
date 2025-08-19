@@ -1,0 +1,119 @@
+Onside News Backend 2.0 — Project Overview
+
+Summary
+- Purpose: GraphQL backend for an “Onside News” application supporting users, posts, and comments with JWT auth, role-based access (admin), optional 2FA, likes, view counting, pagination, and advanced search over posts.
+- Stack: NestJS (GraphQL/Apollo), TypeORM (PostgreSQL), Passport/JWT, bcrypt, class-validator, speakeasy + qrcode (2FA), axios (translation service), pg trigram + full-text search.
+- Schema: Auto-generated to `src/schema.gql` from code-first resolvers/entities.
+
+Architecture & Modules
+- AppModule (`src/app.module.ts`):
+  - GraphQLModule with Apollo driver, playground on, `autoSchemaFile` at `src/schema.gql`.
+  - TypeORM configured for PostgreSQL with `synchronize: true` (runtime; see note below).
+  - Imports feature modules: PostsModule, UsersModule, CommentsModule, AuthModule.
+- AuthModule (`src/auth`):
+  - JWT-based authentication (Bearer token) via Passport.
+  - `AuthResolver` exposes `login` mutation returning `{ accessToken, user }`.
+  - `JwtStrategy` validates tokens and attaches `{ userId, username, role }` to the request.
+  - Guards: `JwtAuthGuard` and `RolesGuard` for role-based access (`@Roles('admin')`).
+- UsersModule (`src/users`):
+  - Manage users: create, read, update, delete; filter/sort queries.
+  - 2FA enrollment flow via `generate2FASecret` mutation (admin-only).
+- PostsModule (`src/posts`):
+  - Manage posts: create/update/delete (admin-guarded), like, view counting, pagination, top-posts, and search.
+  - Tag translation via `TranslationService` to store multilingual tags.
+- CommentsModule (`src/comments`):
+  - Create comments and list by post or user.
+
+Data Model (TypeORM Entities)
+- User (`src/users/user-entities/user.entity.ts`):
+  - Fields: `userId`, `username` (unique), `email` (unique), `password`, `role` (enum: ADMIN/DEFAULT), `dateOfBirth`, `profilePictureUrl?`, timestamps, 2FA: `twoFactorSecret?`, `isTwoFactorEnabled`.
+  - Relations: `OneToMany` to `Post` and `Comment`.
+- Post (`src/posts/entities/post.entity.ts`):
+  - Fields: `postId`, `title`, `content (text)`, `imageUrl?`, `tags` (text[]), `isTop` (boolean), `translated` (jsonb), `authorId`, timestamps, `viewsCount`, internal `searchVector` (tsvector).
+  - Relations: `ManyToOne` `user`, `OneToMany` `comments`, `ManyToMany` `likedBy` users.
+- Comment (`src/comments/entities/comment.entity.ts`):
+  - Fields: `commentId`, `text`, `createdAt`.
+  - Relations: `ManyToOne` `post`, `ManyToOne` `user` (CASCADE deletes).
+
+GraphQL API (Highlights)
+- Mutations (`type Mutation` in `src/schema.gql`):
+  - `login(input: LoginInput!): AuthResponse!` — issue JWT if credentials (and 2FA if enabled) are valid.
+  - `createUser(input: CreateUserInput!): User!` — admin-guarded; creates a user (role validation applied via guard/role).
+  - `updateUser(input: UpdateUserInput!): User!` — update user fields; includes optional 2FA flags/secret in service path.
+  - `deleteUser(id: Int!): Boolean!` — delete a user.
+  - `generate2FASecret: String!` — JWT-protected; admin-only; returns QR code image (data URL) for authenticator apps.
+  - `createPost(input: CreatePostInput!): Post!` — admin-guarded; associates `authorId` from current user, translates tags.
+  - `updatePost(id: Int!, input: UpdatePostInput!): Post!` — admin-guarded; partial update.
+  - `deletePost(id: Int!): Boolean!` — admin-guarded; hard delete.
+  - `likePost(postId: Int!, userId: Int!): Post!` — add like from a user (prevents duplicates).
+  - `createComment(input: CreateCommentInput!): Comment!` — create a comment linked to post and user.
+- Queries (`type Query`):
+  - `users(filter: UserFilterInput): [User!]!`, `user(id: Int!): User!`.
+  - `posts: [Post!]!`, `post(id: Int!): Post!` — increments views with IP-based 1-minute throttle per post.
+  - `postsPaginated(page: Int = 1, pageSize: Int = 12): PostsPage!` — window-count pagination (COUNT(*) OVER()).
+  - `topPosts(limit: Int = 10, sortByCreatedAt: SortOrder): [Post!]!`.
+  - `topPostsPaginated(page: Int = 1, pageSize: Int = 12, sortByCreatedAt?: SortOrder, sortByViews?: SortOrder): PostsPage!`.
+  - `searchPosts(filter: FilterPostsInput): [Post!]!` — full-text + trigram similarity (see Search below).
+  - `commentsByPost(postId: Int!): [Comment!]!`, `commentsByUser(userId: Int!): [Comment!]!`.
+  - `didYouMean(query: String!): String` — optional suggestion for misspelled queries.
+
+Search & “Did You Mean”
+- Full-text search: `search_vector` tsvector column used in `searchPosts` with `to_tsquery('simple', ...)` and `ts_rank` for relevance.
+- Fuzzy search: `pg_trgm` similarity across title, content, and tags for approximate matches.
+- Sorting: by relevance, createdAt, views, title, likes; filter by `isTop`.
+- Suggestions: `didYouMean(query)` lowercases input, returns null if exact word exists in tags/title, otherwise finds the closest word via similarity over tags/title tokens and caches it in `search_corrections` table (created by migration `src/migrations/1752509526146-AddSearchVector.ts`).
+
+Tags Translation
+- `TranslationService` (`src/common/services/translation.service.ts`) posts to `http://localhost:5000/translate` (assumes a local translation service) to translate tags to a set of languages (currently `en`, `ru`).
+- Translations are lowercased and deduplicated, stored back into the `tags` array for multilingual searchability.
+
+Views & Likes
+- Views: `post(id)` resolver calls `registerView(id, ip)`; a per-(post, ip) throttle of 1 minute prevents rapid double-counts. `incrementViews` updates using a SQL increment expression.
+- Likes: `likePost(postId, userId)` loads `likedBy` relation, ensures the user hasn’t liked already, and appends the user.
+
+Pagination
+- `PostsPage` type holds `items`, `page`, `pageSize`, `totalCount`, `totalPages`.
+- Implemented with query builders using LIMIT/OFFSET and a windowed `COUNT(*) OVER()` to avoid a second count query.
+- Dedicated endpoints for all posts and for top posts (optionally sorted by `createdAt` and/or `viewsCount`).
+
+Auth & Security
+- JWT: `JwtStrategy` extracts Bearer token, validates, and populates `req.user`.
+- Guards: `JwtAuthGuard` for authentication; `RolesGuard` consumes `@Roles('admin')` to allow only admins to mutate posts and create users.
+- 2FA: `generate2FASecret` (admin-only) generates a TOTP secret and returns a QR code image; login flow enforces TOTP if `isTwoFactorEnabled` is true.
+- Passwords: compared using `bcrypt`. Note: ensure passwords are hashed before persistence (hashing not shown in `createUser`).
+
+Database & Migrations
+- Runtime TypeORM (in `AppModule`): hardcoded connection to local Postgres with `synchronize: true` (dev convenience only; not recommended in production).
+- CLI TypeORM (`src/data-source.ts`): reads env vars, `synchronize: false`, and uses migrations from `src/migrations/**/*.ts`.
+- Migration `AddSearchVector1752509526146`:
+  - Renames `searchVector` column to `search_vector` if needed.
+  - Creates `search_corrections` table for caching suggestions.
+
+Project Commands (package.json)
+- Dev: `npm run start:dev`
+- Build: `npm run build`, Prod: `npm run start:prod`
+- Tests: `npm run test`, `test:e2e`, `test:cov`
+- TypeORM migrations: `migration:generate`, `migration:run`, `migration:revert` (use `src/data-source.ts`).
+
+Key Files
+- GraphQL schema (generated): `src/schema.gql`
+- Resolvers: `src/posts/posts.resolver.ts`, `src/users/users.resolver.ts`, `src/comments/comments.resolver.ts`, `src/auth/auth.resolver.ts`
+- Services: `src/posts/posts.service.ts`, `src/users/users.service.ts`, `src/comments/comments.service.ts`, `src/auth/auth.service.ts`
+- Entities: `src/posts/entities/post.entity.ts`, `src/users/user-entities/user.entity.ts`, `src/comments/entities/comment.entity.ts`
+- Auth: `src/auth/jwt/*`, `src/auth/guards/*`
+- Utility: `src/common/services/translation.service.ts`, `src/common/utils/totp.ts`
+
+Notable Mutations (Quick List)
+- Auth: `login`
+- Users: `createUser` (admin), `updateUser`, `deleteUser`, `generate2FASecret` (admin + JWT)
+- Posts: `createPost` (admin), `updatePost` (admin), `deletePost` (admin), `likePost`
+- Comments: `createComment`
+
+Operational Notes & Improvements
+- Secrets & DB config: Runtime DB credentials are hardcoded in `AppModule`; consider moving to environment variables and disabling `synchronize` for production.
+- Password hashing: Ensure user passwords are hashed before save (add a hashing step in `UsersService.create` or via subscribers/hooks).
+- Authorization breadth: Consider guarding additional user mutations (update/delete) and comment creation with JWT to prevent anonymous writes.
+- Translation service: Requires a local service at `http://localhost:5000/translate`; document/run that service or add a feature flag/fallback.
+- Indexes & extensions: Ensure `pg_trgm` extension and appropriate GIN/GIST indexes on `search_vector`, `tags`, and trigram indexes for similarity are in place for performance.
+- Rate limiting: View throttle is per-IP in-memory; consider persistent or distributed throttling if horizontally scaling.
+

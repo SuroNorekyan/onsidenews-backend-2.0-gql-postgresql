@@ -1,0 +1,110 @@
+Multilanguage Posts — Change Log and Verification
+
+Branch
+- feature/multilanguage-posts
+
+Summary
+- Added PostContent entity to support per-language title/content/tags (HY/RU/EN).
+- Kept legacy Post.title/content/tags columns; resolvers now return values from the preferred/fallback language bundle for backward compatibility.
+- Extended create/update inputs to accept multilingual payloads while preserving legacy behavior when `contents[]` is absent.
+- Added servedLanguage and contentResolved fields on Post; added optional language arg to post()/posts() to drive resolution, with fallback order: preferred → baseLanguage → EN → RU → HY. Also respects Accept-Language header when arg not provided.
+- Added migration to create post_content table, enum type, default baseLanguage=EN, and backfill existing posts into PostContent.
+
+Files Changed
+- src/common/enums/language-code.enum.ts: New LanguageCode enum (HY, RU, EN) registered in GraphQL.
+- src/posts/entities/post-content.entity.ts: New entity with fields id, postId(FK), language(enum), title, content, tags[], createdAt, updatedAt; unique index (postId, language).
+- src/posts/entities/post.entity.ts: Added baseLanguage enum column, contents relation; kept legacy fields. Removed duplicate import.
+- src/posts/dto/post-content.input.ts: New input for create path with required language, title, content, tags.
+- src/posts/dto/upsert-post-content.input.ts: New input for update path with required language and optional title/content/tags.
+- src/posts/dto/create-post.input.ts: Made title/content nullable; added optional baseLanguage and contents[]. Updated tags to be optional to support contents[]-only payloads (legacy path still requires tags).
+- src/posts/dto/update-post.input.ts: Rewritten to an explicit input including optional legacy fields, baseLanguage, and contents[] (UpsertPostContentInput[]).
+- src/posts/posts.module.ts: Registered PostContent entity in TypeOrmModule.forFeature.
+- src/posts/posts.service.ts: 
+  - create(): legacy path mirrors to PostContent at baseLanguage (default EN); multilingual path stores PostContent rows and aggregates tags for Post.tags. Keeps legacy columns aligned to chosen/base language content (now sets Post.title and Post.content from chosen language to satisfy non-null DB constraints).
+  - update(): upserts per-language PostContent entries; keeps legacy columns aligned to chosen/base language.
+  - findOne/findAll: include contents relation.
+- src/posts/posts.resolver.ts:
+  - Added language arg to post()/posts(); stores preference in request context to be used by field resolvers.
+  - Added ResolveField for servedLanguage (LanguageCode), contentResolved (PostContent), and overridden legacy fields title/content/tags to return language-aware values.
+- src/migrations/1752600000000-AddPostContentAndBaseLanguage.ts: Migration creating enum type languagecode, post_content table with unique index and triggers, adds baseLanguage to post with default EN, and backfills existing posts into post_content. Includes dynamic handling for preexisting schemas (e.g., postid vs "postId", differing enum type names) and casts enums by detecting the regtype at runtime.
+- src/data-source.ts: Registered PostContent entity for migrations.
+
+Schema Changes (GraphQL)
+- enum LanguageCode -> GraphQL `LanguageCode` (HY, RU, EN).
+- input CreatePostInput: title?, content?, imageUrl?, tags!, isTop?, baseLanguage?, contents?: [PostContentInput!].
+- input PostContentInput: language!, title!, content!, tags!: [String!]!
+- input UpdatePostInput: title?, content?, imageUrl?, tags?, isTop?, baseLanguage?, contents?: [UpsertPostContentInput!]
+- input UpsertPostContentInput: language!, title?, content?, tags?: [String!]
+- type Post: added baseLanguage, servedLanguage, contentResolved: PostContent, contents: [PostContent!]
+- type PostContent: id, language, title, content, tags
+- queries: posts(language?: LanguageCode), post(id: Int!, language?: LanguageCode)
+
+Migration Details (SQL key parts)
+- CREATE TYPE "languagecode" AS ENUM ('EN','RU','HY') (if not exists)
+- ALTER TABLE "post" ADD COLUMN "baseLanguage" "languagecode" NULL; UPDATE baseLanguage to 'EN' where null
+- CREATE TABLE "post_content" (id serial, postId int FK, language languagecode, title text, content text, tags text[] default '{}', createdAt, updatedAt)
+- CREATE UNIQUE INDEX ON post_content(postId, language)
+- Backfill: INSERT INTO post_content (postId, language, title, content, tags) SELECT postId, baseLanguage, title, content, tags FROM post WHERE not exists
+
+Language Fallback
+- Order: explicit query arg → Accept-Language header → baseLanguage (if any) → EN → RU → HY.
+- Field resolvers use this order to compute servedLanguage and contentResolved, and override older fields (title/content/tags).
+
+Auth & Guards
+- All post mutations remain guarded by JwtAuthGuard + RolesGuard(admin). Use the provided Bearer token in curl examples.
+
+Curl Commands (replace IDs as returned)
+
+# 1) Legacy-style create (backward compatible)
+curl -X POST http://localhost:3000/graphql \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImFkbWluXzE3NTUyNzQ3MjE0MzQiLCJzdWIiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc1NTU5MTM3NywiZXhwIjoxNzU2MTk2MTc3fQ.wZYBCpzb02kuQ3--Gnw9beHkwhVBxF_XX_3IbHlHQbA' \
+  -d '{
+    "query": "mutation LegacyCreate($input: CreatePostInput!) { createPost(input: $input) { postId title tags baseLanguage servedLanguage contentResolved { language title tags } } }",
+    "variables": {
+      "input": {
+        "title": "Legacy Single-Language Post",
+        "content": "Legacy body...",
+        "tags": ["legacy","single-lang"],
+        "imageUrl": "https://cdn.example.com/legacy.jpg",
+        "isTop": false,
+        "baseLanguage": "EN"
+      }
+    }
+  }'
+
+# 2) Multilingual create
+curl -X POST http://localhost:3000/graphql \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImFkbWluXzE3NTUyNzQ3MjE0MzQiLCJzdWIiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc1NTU5MTM3NywiZXhwIjoxNzU2MTk2MTc3fQ.wZYBCpzb02kuQ3--Gnw9beHkwhVBxF_XX_3IbHlHQbA' \
+  -d '{
+    "query": "mutation CreateMulti($input: CreatePostInput!) { createPost(input: $input) { postId baseLanguage servedLanguage contents { language title } contentResolved { language title } } }",
+    "variables": {
+      "input": {
+        "baseLanguage": "HY",
+        "isTop": true,
+        "imageUrl": "https://cdn.example.com/mc-supercup.jpg",
+        "contents": [
+          { "language": "HY", "title": "Մանչեսթեր Սիթի՝ Սուպերգավաթի ճանապարհին", "content": "# Սիթի\n\n**Ֆոդեն** ...", "tags": ["մանչեսթեր սիթի","ֆոդեն","սուպերգավաթ"] },
+          { "language": "RU", "title": "«Манчестер Сити» на пути к Суперкубку", "content": "# Сити\n\n**Фоден** ...", "tags": ["манчестер сити","фоден","суперкубок"] },
+          { "language": "EN", "title": "Manchester City march toward the Super Cup", "content": "# City\n\n**Foden** ...", "tags": ["manchester city","foden","super cup"] }
+        ]
+      }
+    }
+  }'
+
+# 3) Fetch post with explicit language preference (RU), showing fallback if RU missing
+curl -X POST http://localhost:3000/graphql \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "query": "query OnePostInRU($id:Int!) { post(id:$id, language: RU) { postId servedLanguage contentResolved { language title content tags } title content tags } }",
+    "variables": { "id": 1 }
+  }'
+
+Notes
+- Legacy compatibility: If `contents[]` is omitted, the service requires `title` and `content`, and mirrors them into PostContent at `baseLanguage` (default EN). Field resolvers return these legacy values as the resolved bundle.
+- Aggregated Post.tags: For multilingual payloads, the Post.tags column stores the union of all per-language tags for search compatibility, while GraphQL field `tags` returns the language-specific tags.
+
+Run Results
+- Legacy create succeeded (see mock-posts.txt; returned ID like 15).
+- Multilingual creates succeeded with IDs like 22, 23, 24, 25. Full raw JSON responses appended to mock-posts.txt.

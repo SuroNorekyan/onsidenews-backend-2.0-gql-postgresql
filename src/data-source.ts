@@ -2,6 +2,7 @@
 import 'dotenv/config';
 import { DataSource } from 'typeorm';
 import { Post } from './posts/entities/post.entity';
+import { PostContent } from './posts/entities/post-content.entity';
 import { User } from './users/user-entities/user.entity';
 import { Comment } from './comments/entities/comment.entity';
 
@@ -12,9 +13,8 @@ export const AppDataSource = new DataSource({
   username: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASS || 'Password123123',
   database: process.env.DB_NAME || 'onsidenews',
-  entities: [Post, User, Comment],
+  entities: [Post, PostContent, User, Comment],
   migrations: ['src/migrations/**/*.ts'],
   synchronize: false,
   logging: true,
 });
-
