@@ -160,6 +160,18 @@ export class PostsResolver {
     return this.postsService.getPostsPaginated(args.page, args.pageSize);
   }
 
+  @Query(() => PostsPage)
+  postsInLangPaginated(
+    @Args() args: PostsPaginationArgs,
+    @Args('language', { type: () => LanguageCode, nullable: true })
+    language?: LanguageCode,
+    @Context() ctx?: any,
+  ): Promise<PostsPage> {
+    // Make sure explicit language arg reaches pickContent()
+    if (ctx && language) ctx.req.gqlPreferredLanguage = language;
+    return this.postsService.getPostsPaginated(args.page, args.pageSize);
+  }
+
   @Query(() => [Post])
   async searchPosts(
     @Args('filter', { nullable: true }) filter?: FilterPostsInput,
@@ -177,7 +189,11 @@ export class PostsResolver {
     @Args('limit', { type: () => Int, defaultValue: 10 }) limit: number,
     @Args('sortByCreatedAt', { type: () => SortOrder, nullable: true })
     sortByCreatedAt?: SortOrder,
+    @Args('language', { type: () => LanguageCode, nullable: true }) // 👈 add this
+    language?: LanguageCode,
+    @Context() ctx?: any, // 👈 add this
   ): Promise<Post[]> {
+    if (ctx && language) ctx.req.gqlPreferredLanguage = language; // 👈 important
     return this.postsService.getTopPosts(
       limit,
       sortByCreatedAt ?? SortOrder.DESC,
@@ -203,7 +219,8 @@ export class PostsResolver {
     @Context() ctx: any,
   ): LanguageCode | null {
     const { language } = this.pickContent(post, ctx);
-    return language ?? post.baseLanguage ?? null;
+    // Align fallback with contentResolved so UI badge is reliable
+    return language ?? post.baseLanguage ?? LanguageCode.EN;
   }
 
   @ResolveField(() => PostContent, { name: 'contentResolved' })
@@ -240,3 +257,4 @@ export class PostsResolver {
     return resolved.tags ?? (post as any).tags ?? [];
   }
 }
+

@@ -37,7 +37,9 @@ export class PostsService {
       aggregatedTags = Array.from(set);
     } else {
       if (!rest.title || !rest.content) {
-        throw new Error('title and content are required when contents[] is not provided');
+        throw new Error(
+          'title and content are required when contents[] is not provided',
+        );
       }
       // legacy path: translate incoming tags
       if (!tags || !Array.isArray(tags)) {
@@ -45,7 +47,8 @@ export class PostsService {
       }
       const allTags = new Set<string>();
       for (const tag of tags) {
-        const translated = await this.translationService.translateToAllLanguages(tag);
+        const translated =
+          await this.translationService.translateToAllLanguages(tag);
         translated.forEach((t) => allTags.add(t));
       }
       aggregatedTags = Array.from(allTags);
@@ -59,7 +62,8 @@ export class PostsService {
 
     if (contents?.length) {
       const baseLang = baseLanguage ?? contents[0].language;
-      const chosen = contents.find((c) => c.language === baseLang) || contents[0];
+      const chosen =
+        contents.find((c) => c.language === baseLang) || contents[0];
       if (chosen) {
         if (chosen.title) post.title = chosen.title;
         if (chosen.content) post.content = chosen.content;
@@ -126,11 +130,14 @@ export class PostsService {
         }
       }
 
-      const langToUse = baseLanguage ?? post.baseLanguage ?? contents[0].language;
-      const chosen = contents.find((c) => c.language === langToUse) || contents[0];
+      const langToUse =
+        baseLanguage ?? post.baseLanguage ?? contents[0].language;
+      const chosen =
+        contents.find((c) => c.language === langToUse) || contents[0];
       const updatedLegacy: Partial<Post> = {};
       if (typeof chosen.title === 'string') updatedLegacy.title = chosen.title;
-      if (typeof chosen.content === 'string') updatedLegacy.content = chosen.content;
+      if (typeof chosen.content === 'string')
+        updatedLegacy.content = chosen.content;
       if (Array.isArray(chosen.tags)) updatedLegacy.tags = chosen.tags;
       if (Object.keys(updatedLegacy).length) {
         await this.postRepository.update(id, updatedLegacy);
@@ -339,24 +346,23 @@ export class PostsService {
 
   async getPostsPaginated(page = 1, pageSize = 12) {
     const safePage = Math.max(1, page);
-    const safePageSize = Math.min(Math.max(1, pageSize), 100); // hard cap for safety
+    const safePageSize = Math.min(Math.max(1, pageSize), 100);
     const offset = (safePage - 1) * safePageSize;
 
     const qb = this.postRepository
       .createQueryBuilder('post')
       .leftJoinAndSelect('post.user', 'user')
       .leftJoinAndSelect('post.comments', 'comments')
+      .leftJoinAndSelect('post.contents', 'contents') // keep contents loaded
       .orderBy('post.createdAt', 'DESC')
       .offset(offset)
       .limit(safePageSize);
 
-    // Ask Postgres to compute total in the same result set
-    qb.select([
-      'post', // selects all post columns (entity selection)
-      'user',
-      'comments',
-    ]);
-    // add raw count column
+    // EITHER: don’t call select() at all (let TypeORM select entity + joined relations)
+    // OR: if you want explicit select, INCLUDE contents:
+    qb.select(['post', 'user', 'comments', 'contents']);
+
+    // Running this ONCE is enough
     qb.addSelect('COUNT(*) OVER() AS "fullCount"');
 
     const { entities: items, raw } = await qb.getRawAndEntities();
@@ -381,7 +387,7 @@ export class PostsService {
       where: { isTop: true },
       order: { createdAt: sortByCreatedAt },
       take: limit,
-      relations: ['user', 'comments'],
+      relations: ['user', 'comments', 'contents'],
     });
   }
 
@@ -400,11 +406,11 @@ export class PostsService {
       .createQueryBuilder('post')
       .leftJoinAndSelect('post.user', 'user')
       .leftJoinAndSelect('post.comments', 'comments')
+      .leftJoinAndSelect('post.contents', 'contents') // keep contents loaded
       .where('post.isTop = :isTop', { isTop: true })
       .offset(offset)
       .limit(safePageSize);
 
-    // default primary ordering by createdAt DESC if no explicit sort is given
     if (!sortByCreatedAt && !sortByViews) {
       qb.orderBy('post.createdAt', 'DESC');
     } else {
@@ -412,7 +418,8 @@ export class PostsService {
       if (sortByViews) qb.addOrderBy('post.viewsCount', sortByViews);
     }
 
-    qb.select(['post', 'user', 'comments']);
+    // Include contents here too (don’t drop it)
+    qb.select(['post', 'user', 'comments', 'contents']);
     qb.addSelect('COUNT(*) OVER() AS "fullCount"');
 
     const { entities: items, raw } = await qb.getRawAndEntities();
@@ -428,3 +435,4 @@ export class PostsService {
     };
   }
 }
+

@@ -6,4 +6,4 @@ export enum LanguageCode {
   HY = 'HY',
 }
 
-registerEnumType(LanguageCode, { name: 'Language' });
+registerEnumType(LanguageCode, { name: 'LanguageCode' });

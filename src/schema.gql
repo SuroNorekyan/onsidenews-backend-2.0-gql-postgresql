@@ -22,7 +22,7 @@ input CreateCommentInput {
 }
 
 input CreatePostInput {
-  baseLanguage: Language
+  baseLanguage: LanguageCode
   content: String
   contents: [PostContentInput!]
   imageUrl: String
@@ -57,7 +57,7 @@ input FilterPostsInput {
   title: String
 }
 
-enum Language {
+enum LanguageCode {
   EN
   HY
   RU
@@ -84,7 +84,7 @@ type Mutation {
 
 type Post {
   authorId: Float!
-  baseLanguage: Language
+  baseLanguage: LanguageCode
   comments: [Comment!]
   content: String!
   contentResolved: PostContent!
@@ -94,7 +94,7 @@ type Post {
   isTop: Boolean!
   likedBy: [User!]!
   postId: ID!
-  servedLanguage: Language
+  servedLanguage: LanguageCode
   tags: [String!]!
   title: String!
   translated: Translated
@@ -107,7 +107,7 @@ type PostContent {
   content: String!
   createdAt: DateTime!
   id: ID!
-  language: Language!
+  language: LanguageCode!
   tags: [String!]!
   title: String!
   updatedAt: DateTime!
@@ -115,7 +115,7 @@ type PostContent {
 
 input PostContentInput {
   content: String!
-  language: Language!
+  language: LanguageCode!
   tags: [String!]!
   title: String!
 }
@@ -132,11 +132,12 @@ type Query {
   commentsByPost(postId: Int!): [Comment!]!
   commentsByUser(userId: Int!): [Comment!]!
   didYouMean(query: String!): String
-  post(id: Int!, language: Language): Post!
-  posts(language: Language): [Post!]!
+  post(id: Int!, language: LanguageCode): Post!
+  posts(language: LanguageCode): [Post!]!
+  postsInLangPaginated(language: LanguageCode, page: Int! = 1, pageSize: Int! = 12): PostsPage!
   postsPaginated(page: Int! = 1, pageSize: Int! = 12): PostsPage!
   searchPosts(filter: FilterPostsInput): [Post!]!
-  topPosts(limit: Int! = 10, sortByCreatedAt: SortOrder): [Post!]!
+  topPosts(language: LanguageCode, limit: Int! = 10, sortByCreatedAt: SortOrder): [Post!]!
   topPostsPaginated(
     page: Int! = 1
     pageSize: Int! = 12
@@ -163,7 +164,7 @@ type Translated {
 }
 
 input UpdatePostInput {
-  baseLanguage: Language
+  baseLanguage: LanguageCode
   content: String
   contents: [UpsertPostContentInput!]
   imageUrl: String
@@ -186,7 +187,7 @@ input UpdateUserInput {
 
 input UpsertPostContentInput {
   content: String
-  language: Language!
+  language: LanguageCode!
   tags: [String!]
   title: String
 }
