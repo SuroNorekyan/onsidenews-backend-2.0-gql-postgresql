@@ -167,7 +167,6 @@ export class PostsResolver {
     language?: LanguageCode,
     @Context() ctx?: any,
   ): Promise<PostsPage> {
-    // Make sure explicit language arg reaches pickContent()
     if (ctx && language) ctx.req.gqlPreferredLanguage = language;
     return this.postsService.getPostsPaginated(args.page, args.pageSize);
   }
@@ -175,7 +174,11 @@ export class PostsResolver {
   @Query(() => [Post])
   async searchPosts(
     @Args('filter', { nullable: true }) filter?: FilterPostsInput,
+    @Args('language', { type: () => LanguageCode, nullable: true })
+    language?: LanguageCode,
+    @Context() ctx?: any,
   ): Promise<Post[]> {
+    if (ctx && language) ctx.req.gqlPreferredLanguage = language;
     return this.postsService.searchPosts(filter || {});
   }
 
@@ -219,7 +222,6 @@ export class PostsResolver {
     @Context() ctx: any,
   ): LanguageCode | null {
     const { language } = this.pickContent(post, ctx);
-    // Align fallback with contentResolved so UI badge is reliable
     return language ?? post.baseLanguage ?? LanguageCode.EN;
   }
 
@@ -257,4 +259,3 @@ export class PostsResolver {
     return resolved.tags ?? (post as any).tags ?? [];
   }
 }
-

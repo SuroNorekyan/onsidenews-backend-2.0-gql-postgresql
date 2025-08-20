@@ -136,7 +136,7 @@ type Query {
   posts(language: LanguageCode): [Post!]!
   postsInLangPaginated(language: LanguageCode, page: Int! = 1, pageSize: Int! = 12): PostsPage!
   postsPaginated(page: Int! = 1, pageSize: Int! = 12): PostsPage!
-  searchPosts(filter: FilterPostsInput): [Post!]!
+  searchPosts(filter: FilterPostsInput, language: LanguageCode): [Post!]!
   topPosts(language: LanguageCode, limit: Int! = 10, sortByCreatedAt: SortOrder): [Post!]!
   topPostsPaginated(
     page: Int! = 1

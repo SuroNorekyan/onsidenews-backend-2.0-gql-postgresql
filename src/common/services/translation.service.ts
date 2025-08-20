@@ -6,7 +6,7 @@ export class TranslationService {
   private readonly baseUrl = 'http://localhost:5000/translate';
 
   async translateToAllLanguages(input: string): Promise<string[]> {
-    const langs = ['en', 'ru'];
+    const langs = ['en', 'ru', 'hy'];
     const inputLower = input.toLowerCase();
     const results = new Set<string>([inputLower]);
 
@@ -16,6 +16,12 @@ export class TranslationService {
           // Avoid unnecessary same-language translation
           if (lang === 'en' && /^[a-z0-9\s\-]+$/i.test(input)) {
             return; // likely already English
+          }
+          if (lang === 'ru' && /[\u0400-\u04FF]/.test(input)) {
+            return; // already Cyrillic
+          }
+          if (lang === 'hy' && /[\u0530-\u058F]/.test(input)) {
+            return; // already Armenian
           }
 
           const res = await axios.post(this.baseUrl, {
@@ -37,4 +43,3 @@ export class TranslationService {
     return Array.from(results);
   }
 }
-

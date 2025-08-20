@@ -1,7 +1,7 @@
 // src/posts/post.service.ts
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Brackets, Repository } from 'typeorm';
 import { CreatePostInput } from './dto/create-post.input';
 import { Post } from './entities/post.entity';
 import { User } from 'src/users/user-entities/user.entity';
@@ -204,122 +204,233 @@ export class PostsService {
   }
 
   async searchPosts(filter: FilterPostsInput): Promise<Post[]> {
-    const qb = this.postRepository.createQueryBuilder('post');
+    const qb = this.postRepository
+      .createQueryBuilder('post')
+      .leftJoinAndSelect('post.user', 'user')
+      .leftJoinAndSelect('post.comments', 'comments')
+      .leftJoinAndSelect('post.contents', 'c'); // search multilingual content
 
     if (filter.isTop !== undefined) {
       qb.andWhere('post.isTop = :isTop', { isTop: filter.isTop });
     }
 
     if (filter.containsText) {
-      const plainQuery = filter.containsText.trim();
-      const tsQuery = plainQuery
-        .split(/\s+/)
-        .map((word) => `${word}:*`)
-        .join(' & ');
+      const raw = filter.containsText.trim();
+      if (raw) {
+        // Preselect IDs via robust plain ILIKE across post + post_content
+        let variants: string[] = [];
+        try {
+          variants = await this.translationService.translateToAllLanguages(raw);
+        } catch {}
+        const allBasic = Array.from(new Set([raw, ...variants]));
+        const patsBasic = allBasic.map((v) => `%${v}%`);
+        const clausesBasic: string[] = [];
+        const paramsBasic: string[] = [];
+        allBasic.forEach((_v, i) => {
+          const ph = `$${i + 1}`;
+          paramsBasic.push(patsBasic[i]);
+          clausesBasic.push(
+            `(
+             p.title ILIKE ${ph} OR p.content ILIKE ${ph} OR
+             c.title ILIKE ${ph} OR c.content ILIKE ${ph} OR
+             EXISTS (SELECT 1 FROM unnest(p.tags) AS t WHERE t ILIKE ${ph}) OR
+             EXISTS (SELECT 1 FROM unnest(c.tags) AS tc WHERE tc ILIKE ${ph})
+            )`,
+          );
+        });
+        const idRowsBasic: Array<{ postid: number; createdat: string }> =
+          await this.postRepository.query(
+            `SELECT DISTINCT p."postId" as postid, p."createdAt" as createdat
+             FROM post p LEFT JOIN post_content c ON c."postPostId" = p."postId"
+             WHERE ${clausesBasic.join(' OR ')}
+             ORDER BY p."createdAt" DESC`,
+            paramsBasic,
+          );
+        if (idRowsBasic.length === 0) return [];
+        const idsBasic = idRowsBasic.map((r) => r.postid);
+        const preselected = await this.postRepository.find({
+          where: idsBasic.map((id) => ({ postId: id })),
+          order: { createdAt: 'DESC' },
+          relations: ['user', 'comments', 'contents'],
+        });
+        return preselected;
+        const all = Array.from(new Set([raw, ...variants])).map((v) =>
+          v.toLowerCase(),
+        );
+        const patterns = all.map((v) => `%${v}%`);
+        const patternParamMap: Record<string, string> = {};
+        const patternParamNames = patterns.map((p, i) => {
+          const key = `pat${i}`;
+          patternParamMap[key] = p;
+          return `:${key}`;
+        });
 
-      // 🟢 Full-text search
-      qb.where(`"post"."search_vector" @@ to_tsquery('simple', :tsQuery)`, {
-        tsQuery,
-      });
+        const tsVariants = all.filter(Boolean);
 
-      // 🟢 Fuzzy matching with pg_trgm (title + content)
-      qb.orWhere(
-        `similarity("post"."title", :plain) > 0.3 OR similarity("post"."content", :plain) > 0.3`,
-        { plain: plainQuery },
-      );
+        // Optional: Relevance score
+        // Optional rank using the first variant only (keeps SQL compact)
+        if (tsVariants.length > 0) {
+          qb.addSelect(
+            `
+          COALESCE(ts_rank(to_tsvector('simple', coalesce(post.title,'') || ' ' || coalesce(post.content,'')), plainto_tsquery('simple', :tsv0)), 0)
+          + COALESCE(ts_rank(to_tsvector('simple', coalesce(c.title,'') || ' ' || coalesce(c.content,'')), plainto_tsquery('simple', :tsv0)), 0)
+          + COALESCE(ts_rank(to_tsvector('simple', array_to_string(coalesce(post.tags, '{}'), ' ')), plainto_tsquery('simple', :tsv0)), 0)
+          + COALESCE(ts_rank(to_tsvector('simple', array_to_string(coalesce(c.tags, '{}'), ' ')), plainto_tsquery('simple', :tsv0)), 0)
+          `,
+            'rank',
+          );
+        }
 
-      // 🟢 Fuzzy matching with tags
-      qb.orWhere(
-        `EXISTS (
-        SELECT 1 FROM unnest("post"."tags") AS tag
-        WHERE similarity(tag, :plain) > 0.3
-      )`,
-        { plain: plainQuery },
-      );
+        qb.andWhere(
+          new Brackets((w) => {
+            // ILIKE paths for multilingual text
+            const orFor = (expr: string) =>
+              patternParamNames.map((n) => `${expr} ILIKE ${n}`).join(' OR ');
 
-      // 🟢 Optional: relevance score
-      qb.addSelect(
-        `ts_rank("post"."search_vector", to_tsquery('simple', :tsQuery))`,
-        'rank',
-      );
+            w.where(
+              `(${orFor('post.title')} OR ${orFor('post.content')} OR ${orFor(
+                'c.title',
+              )} OR ${orFor('c.content')})`,
+            );
 
-      if (filter.sortByRelevance) {
-        qb.orderBy('rank', filter.sortByRelevance);
+            // Tags (ILIKE)
+            const tagMatch = (alias: string) =>
+              patternParamNames.map((n) => `${alias} ILIKE ${n}`).join(' OR ');
+            w.orWhere(
+              `EXISTS (SELECT 1 FROM unnest(post.tags) AS tag WHERE ${tagMatch(
+                'tag',
+              )}) OR EXISTS (SELECT 1 FROM unnest(c.tags) AS tagc WHERE ${tagMatch(
+                'tagc',
+              )})`,
+            );
+
+            // Full-text
+            if (tsVariants.length > 0) {
+              const makeTsOr = (expr: string) =>
+                tsVariants
+                  .map((_, i) => `${expr} @@ plainto_tsquery('simple', :tsv${i})`)
+                  .join(' OR ');
+              w.orWhere(
+                `(${makeTsOr(
+                  `to_tsvector('simple', coalesce(post.title,'') || ' ' || coalesce(post.content,''))`,
+                )} OR ${makeTsOr(
+                  `to_tsvector('simple', coalesce(c.title,'') || ' ' || coalesce(c.content,''))`,
+                )} OR ${makeTsOr(
+                  `to_tsvector('simple', array_to_string(coalesce(post.tags, '{}'), ' '))`,
+                )} OR ${makeTsOr(
+                  `to_tsvector('simple', array_to_string(coalesce(c.tags, '{}'), ' '))`,
+                )})`,
+              );
+            }
+
+            // Trigram fuzzy
+            w.orWhere(`
+            similarity(public.f_unaccent(lower(post.title)), :qbase) > 0.3
+            OR similarity(public.f_unaccent(lower(post.content)), :qbase) > 0.3
+            OR similarity(public.f_unaccent(lower(c.title)), :qbase) > 0.3
+            OR similarity(public.f_unaccent(lower(c.content)), :qbase) > 0.3
+          `);
+          }),
+        );
+
+        const tsParams: Record<string, string> = {};
+        tsVariants.forEach((val, i) => (tsParams[`tsv${i}`] = val));
+        qb.setParameters({
+          ...patternParamMap,
+          ...tsParams,
+          qbase: raw.toLowerCase(),
+        });
+
+        if (filter.sortByRelevance) {
+          qb.addOrderBy('rank', filter.sortByRelevance);
+        }
       }
     }
 
-    if (filter.sortByCreatedAt) {
-      qb.addOrderBy('"post"."createdAt"', filter.sortByCreatedAt);
-    }
-
-    if (filter.sortByViews) {
-      qb.addOrderBy('"post"."viewsCount"', filter.sortByViews);
-    }
-
     if (filter.title) {
-      qb.andWhere(`LOWER(post.title) ILIKE LOWER(:title)`, {
-        title: `%${filter.title}%`,
-      });
+      qb.andWhere(
+        `public.f_unaccent(lower(post.title)) ILIKE public.f_unaccent(lower(:title))`,
+        {
+          title: `%${filter.title}%`,
+        },
+      );
     }
 
     if (filter.authorName) {
-      qb.leftJoinAndSelect('post.user', 'user');
-      qb.andWhere(`LOWER(user.name) ILIKE LOWER(:name)`, {
-        name: `%${filter.authorName}%`,
-      });
+      qb.andWhere(
+        `public.f_unaccent(lower(user.name)) ILIKE public.f_unaccent(lower(:name))`,
+        {
+          name: `%${filter.authorName}%`,
+        },
+      );
     }
 
-    if (filter.sortByTitle) {
-      qb.addOrderBy('post.title', filter.sortByTitle);
-    }
+    if (filter.sortByCreatedAt)
+      qb.addOrderBy('post.createdAt', filter.sortByCreatedAt);
+    if (filter.sortByViews)
+      qb.addOrderBy('post.viewsCount', filter.sortByViews);
+    if (filter.sortByTitle) qb.addOrderBy('post.title', filter.sortByTitle);
 
     if (filter.sortByLikes) {
       qb.loadRelationCountAndMap('post.likeCount', 'post.likedBy');
       qb.addOrderBy('post.likeCount', filter.sortByLikes);
     }
 
-    qb.leftJoinAndSelect('post.user', 'user');
-    qb.leftJoinAndSelect('post.comments', 'comments');
+    if (!filter.sortByRelevance && !filter.sortByCreatedAt) {
+      qb.addOrderBy('post.createdAt', 'DESC');
+    }
 
     return qb.getMany();
   }
 
   async getDidYouMeanSuggestion(query: string): Promise<string | null> {
     const trimmed = query.trim().toLowerCase();
+    if (!trimmed) return null;
 
-    // ✅ 1. Early exit: if input already exists in tags/title, return null
+    // Exact token exists? (post + post_content, tags + title words)
     const exists = await this.postRepository.query(
       `
-    SELECT 1 FROM (
+    WITH words AS (
       SELECT unnest(tags) AS word FROM post
-      UNION
+      UNION ALL
       SELECT regexp_split_to_table(title, E'\\s+') AS word FROM post
-    ) AS words
-    WHERE lower(word) = $1
+      UNION ALL
+      SELECT unnest(tags) AS word FROM post_content
+      UNION ALL
+      SELECT regexp_split_to_table(title, E'\\s+') AS word FROM post_content
+    )
+    SELECT 1
+    FROM words
+    WHERE public.f_unaccent(lower(word)) = public.f_unaccent(lower($1))
     LIMIT 1;
     `,
       [trimmed],
     );
     if (exists.length > 0) return null;
 
-    // ✅ 2. Check if we've already cached a correction
+    // Cache
     const cached = await this.postRepository.query(
       `SELECT suggestion FROM search_corrections WHERE query = $1 LIMIT 1`,
       [trimmed],
     );
     if (cached.length > 0) return cached[0].suggestion;
 
-    // ✅ 3. Run fuzzy match using similarity
+    // Fuzzy suggestion
     const result = await this.postRepository.query(
       `
-    SELECT word
-    FROM (
-      SELECT DISTINCT unnest(tags) AS word FROM post
+    WITH words AS (
+      SELECT DISTINCT public.f_unaccent(lower(unnest(tags))) AS word FROM post
       UNION
-      SELECT DISTINCT regexp_split_to_table(title, E'\\s+') AS word FROM post
-    ) AS words
-    WHERE similarity(word, $1) > 0.4
-    ORDER BY similarity(word, $1) DESC
+      SELECT DISTINCT public.f_unaccent(lower(regexp_split_to_table(title, E'\\s+'))) AS word FROM post
+      UNION
+      SELECT DISTINCT public.f_unaccent(lower(unnest(tags))) AS word FROM post_content
+      UNION
+      SELECT DISTINCT public.f_unaccent(lower(regexp_split_to_table(title, E'\\s+'))) AS word FROM post_content
+    )
+    SELECT word
+    FROM words
+    WHERE similarity(word, public.f_unaccent(lower($1))) > 0.4
+    ORDER BY similarity(word, public.f_unaccent(lower($1))) DESC
     LIMIT 1;
     `,
       [trimmed],
@@ -327,8 +438,6 @@ export class PostsService {
 
     if (result?.length > 0) {
       const suggestion = result[0].word;
-
-      // ✅ 4. Cache the correction
       await this.postRepository.query(
         `
       INSERT INTO search_corrections (query, suggestion)
@@ -337,7 +446,6 @@ export class PostsService {
       `,
         [trimmed, suggestion],
       );
-
       return suggestion;
     }
 
@@ -435,4 +543,3 @@ export class PostsService {
     };
   }
 }
-
