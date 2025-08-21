@@ -134,11 +134,12 @@ type Query {
   didYouMean(query: String!): String
   post(id: Int!, language: LanguageCode): Post!
   posts(language: LanguageCode): [Post!]!
-  postsInLangPaginated(language: LanguageCode, page: Int! = 1, pageSize: Int! = 12): PostsPage!
-  postsPaginated(page: Int! = 1, pageSize: Int! = 12): PostsPage!
+  postsInLangPaginated(language: LanguageCode, page: Int! = 1, pageSize: Int! = 12, sortByCreatedAt: SortOrder, sortByViews: SortOrder): PostsPage!
+  postsPaginated(page: Int! = 1, pageSize: Int! = 12, sortByCreatedAt: SortOrder, sortByViews: SortOrder): PostsPage!
   searchPosts(filter: FilterPostsInput, language: LanguageCode): [Post!]!
   topPosts(language: LanguageCode, limit: Int! = 10, sortByCreatedAt: SortOrder): [Post!]!
-  topPostsPaginated(
+  topPostsInLangPaginated(
+    language: LanguageCode
     page: Int! = 1
     pageSize: Int! = 12
 

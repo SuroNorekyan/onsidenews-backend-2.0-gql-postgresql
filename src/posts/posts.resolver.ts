@@ -157,7 +157,12 @@ export class PostsResolver {
 
   @Query(() => PostsPage)
   postsPaginated(@Args() args: PostsPaginationArgs): Promise<PostsPage> {
-    return this.postsService.getPostsPaginated(args.page, args.pageSize);
+    return this.postsService.getPostsPaginated(
+      args.page,
+      args.pageSize,
+      args.sortByCreatedAt,
+      args.sortByViews,
+    );
   }
 
   @Query(() => PostsPage)
@@ -168,7 +173,12 @@ export class PostsResolver {
     @Context() ctx?: any,
   ): Promise<PostsPage> {
     if (ctx && language) ctx.req.gqlPreferredLanguage = language;
-    return this.postsService.getPostsPaginated(args.page, args.pageSize);
+    return this.postsService.getPostsPaginated(
+      args.page,
+      args.pageSize,
+      args.sortByCreatedAt,
+      args.sortByViews,
+    );
   }
 
   @Query(() => [Post])
@@ -205,9 +215,13 @@ export class PostsResolver {
 
   // 🔹 paginated list for the Top Posts page
   @Query(() => PostsPage)
-  async topPostsPaginated(
+  async topPostsInLangPaginated(
     @Args() args: TopPostsPaginationArgs,
+    @Args('language', { type: () => LanguageCode, nullable: true })
+    language?: LanguageCode,
+    @Context() ctx?: any,
   ): Promise<PostsPage> {
+    if (ctx && language) ctx.req.gqlPreferredLanguage = language;
     return this.postsService.getTopPostsPaginated(
       args.page,
       args.pageSize,
@@ -259,3 +273,4 @@ export class PostsResolver {
     return resolved.tags ?? (post as any).tags ?? [];
   }
 }
+

@@ -254,96 +254,6 @@ export class PostsService {
           relations: ['user', 'comments', 'contents'],
         });
         return preselected;
-        const all = Array.from(new Set([raw, ...variants])).map((v) =>
-          v.toLowerCase(),
-        );
-        const patterns = all.map((v) => `%${v}%`);
-        const patternParamMap: Record<string, string> = {};
-        const patternParamNames = patterns.map((p, i) => {
-          const key = `pat${i}`;
-          patternParamMap[key] = p;
-          return `:${key}`;
-        });
-
-        const tsVariants = all.filter(Boolean);
-
-        // Optional: Relevance score
-        // Optional rank using the first variant only (keeps SQL compact)
-        if (tsVariants.length > 0) {
-          qb.addSelect(
-            `
-          COALESCE(ts_rank(to_tsvector('simple', coalesce(post.title,'') || ' ' || coalesce(post.content,'')), plainto_tsquery('simple', :tsv0)), 0)
-          + COALESCE(ts_rank(to_tsvector('simple', coalesce(c.title,'') || ' ' || coalesce(c.content,'')), plainto_tsquery('simple', :tsv0)), 0)
-          + COALESCE(ts_rank(to_tsvector('simple', array_to_string(coalesce(post.tags, '{}'), ' ')), plainto_tsquery('simple', :tsv0)), 0)
-          + COALESCE(ts_rank(to_tsvector('simple', array_to_string(coalesce(c.tags, '{}'), ' ')), plainto_tsquery('simple', :tsv0)), 0)
-          `,
-            'rank',
-          );
-        }
-
-        qb.andWhere(
-          new Brackets((w) => {
-            // ILIKE paths for multilingual text
-            const orFor = (expr: string) =>
-              patternParamNames.map((n) => `${expr} ILIKE ${n}`).join(' OR ');
-
-            w.where(
-              `(${orFor('post.title')} OR ${orFor('post.content')} OR ${orFor(
-                'c.title',
-              )} OR ${orFor('c.content')})`,
-            );
-
-            // Tags (ILIKE)
-            const tagMatch = (alias: string) =>
-              patternParamNames.map((n) => `${alias} ILIKE ${n}`).join(' OR ');
-            w.orWhere(
-              `EXISTS (SELECT 1 FROM unnest(post.tags) AS tag WHERE ${tagMatch(
-                'tag',
-              )}) OR EXISTS (SELECT 1 FROM unnest(c.tags) AS tagc WHERE ${tagMatch(
-                'tagc',
-              )})`,
-            );
-
-            // Full-text
-            if (tsVariants.length > 0) {
-              const makeTsOr = (expr: string) =>
-                tsVariants
-                  .map((_, i) => `${expr} @@ plainto_tsquery('simple', :tsv${i})`)
-                  .join(' OR ');
-              w.orWhere(
-                `(${makeTsOr(
-                  `to_tsvector('simple', coalesce(post.title,'') || ' ' || coalesce(post.content,''))`,
-                )} OR ${makeTsOr(
-                  `to_tsvector('simple', coalesce(c.title,'') || ' ' || coalesce(c.content,''))`,
-                )} OR ${makeTsOr(
-                  `to_tsvector('simple', array_to_string(coalesce(post.tags, '{}'), ' '))`,
-                )} OR ${makeTsOr(
-                  `to_tsvector('simple', array_to_string(coalesce(c.tags, '{}'), ' '))`,
-                )})`,
-              );
-            }
-
-            // Trigram fuzzy
-            w.orWhere(`
-            similarity(public.f_unaccent(lower(post.title)), :qbase) > 0.3
-            OR similarity(public.f_unaccent(lower(post.content)), :qbase) > 0.3
-            OR similarity(public.f_unaccent(lower(c.title)), :qbase) > 0.3
-            OR similarity(public.f_unaccent(lower(c.content)), :qbase) > 0.3
-          `);
-          }),
-        );
-
-        const tsParams: Record<string, string> = {};
-        tsVariants.forEach((val, i) => (tsParams[`tsv${i}`] = val));
-        qb.setParameters({
-          ...patternParamMap,
-          ...tsParams,
-          qbase: raw.toLowerCase(),
-        });
-
-        if (filter.sortByRelevance) {
-          qb.addOrderBy('rank', filter.sortByRelevance);
-        }
       }
     }
 
@@ -452,7 +362,12 @@ export class PostsService {
     return null;
   }
 
-  async getPostsPaginated(page = 1, pageSize = 12) {
+  async getPostsPaginated(
+    page = 1,
+    pageSize = 12,
+    sortByCreatedAt?: SortOrder,
+    sortByViews?: SortOrder,
+  ) {
     const safePage = Math.max(1, page);
     const safePageSize = Math.min(Math.max(1, pageSize), 100);
     const offset = (safePage - 1) * safePageSize;
@@ -461,16 +376,19 @@ export class PostsService {
       .createQueryBuilder('post')
       .leftJoinAndSelect('post.user', 'user')
       .leftJoinAndSelect('post.comments', 'comments')
-      .leftJoinAndSelect('post.contents', 'contents') // keep contents loaded
-      .orderBy('post.createdAt', 'DESC')
+      .leftJoinAndSelect('post.contents', 'contents')
       .offset(offset)
       .limit(safePageSize);
 
-    // EITHER: don’t call select() at all (let TypeORM select entity + joined relations)
-    // OR: if you want explicit select, INCLUDE contents:
-    qb.select(['post', 'user', 'comments', 'contents']);
+    // default: newest first if nothing specified
+    if (!sortByCreatedAt && !sortByViews) {
+      qb.orderBy('post.createdAt', 'DESC');
+    } else {
+      if (sortByCreatedAt) qb.addOrderBy('post.createdAt', sortByCreatedAt);
+      if (sortByViews) qb.addOrderBy('post.viewsCount', sortByViews);
+    }
 
-    // Running this ONCE is enough
+    qb.select(['post', 'user', 'comments', 'contents']);
     qb.addSelect('COUNT(*) OVER() AS "fullCount"');
 
     const { entities: items, raw } = await qb.getRawAndEntities();
@@ -543,3 +461,4 @@ export class PostsService {
     };
   }
 }
+
