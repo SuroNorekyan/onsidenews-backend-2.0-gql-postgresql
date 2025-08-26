@@ -1,170 +1,734 @@
-TITLE: Extend existing posts to full multilingual support (HY/RU/EN) without rebuilding from scratch
+APIFOOTBALL_KEY: b08e802a8dea1d274409c1a79334d6e0
 
-OWNER: Codex
-PRIORITY: P0
-BRANCH: feature/multilanguage-posts
-TARGET STACK: NestJS + GraphQL + TypeORM + PostgreSQL (existing project)
-SCOPE: src/posts only + necessary migrations and DTOs
+1) Task Brief
 
-GOAL
-Enhance the current posts feature in src/posts to support three languages (Armenian=HY, Russian=RU, English=EN) for title, content (markdown), and tags—without removing or breaking current functionality. Keep the existing createPost mutation working as-is, and extend it to optionally accept multilingual payloads.
+Project goal
+Integrate API‑Football into a NestJS + PostgreSQL backend to fetch football (soccer) data for:
 
-IMPORTANT CONTEXT
-- Posts already exist (entities/resolvers/services) and there is an existing GraphQL mutation like:
-  mutation {
-    createPost(input: {
-      title: "lewangoalski."
-      content: "mock..."
-      tags: ["dortmund","german league","asdzxc"]
-      imageUrl: "url"
-      isTop: true
-    }) {
-      postId
-      title
-      tags
+player season stats (by league + season)
+
+team season stats (by league + season)
+
+a single match bundle (fixture + events + lineups)
+Convert provider responses into a stable facts JSON we can (a) show in the UI and (b) feed to an LLM to generate posts (without inventing numbers).
+
+Constraints & non‑goals
+
+No Redis. Use PostgreSQL as a small TTL snapshot store to avoid duplicate upstream calls and to keep reproducible facts for AI.
+
+Respect free‑tier limits (≈100 requests/day, ~10 req/min). Minimize calls and add short TTLs.
+
+No scraping of prohibited websites; we only use API‑Football.
+
+We target Armenia + Russia + top leagues; exact league/team/player IDs are fetched on demand via API‑Football and cached.
+
+LLM integration is stubbed for now (return deterministic Markdown) but leave a single method where we can plug a real model later.
+
+Environment
+
+APIFOOTBALL_KEY – user’s API key (already issued)
+
+APIFOOTBALL_BASE=https://v3.football.api-sports.io
+
+SAFE_MODE=true|false – when true, never call provider if a fresh snapshot doesn’t exist; throw a helpful error instead (prevents wasted quota during dev).
+
+USE_SAMPLES_WHEN_MISSING=true|false – when true and no fresh snapshot exists, load a local JSON from samples/ to serve responses (dry‑run without hitting the API).
+
+LOG_PROVIDER_CALLS=true|false – log every external call.
+
+Data model additions (Postgres)
+A single table to persist upstream payloads:
+
+provider_snapshot(
+  snapshot_id BIGSERIAL PK,
+  provider TEXT,                 -- 'api-football'
+  endpoint TEXT,                 -- '/players', '/teams/statistics', '/fixtures', '/fixtures/events', '/fixtures/lineups'
+  params_hash TEXT,              -- sha1 hash of sorted params
+  params_json JSONB,
+  data_json JSONB,
+  ttl_sec INT DEFAULT 300,
+  fetched_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(provider, endpoint, params_hash)
+)
+
+
+Notes:
+
+“Snapshot” = the exact upstream JSON we received for (endpoint, params).
+
+We consider it fresh while now < fetched_at + ttl_sec.
+
+Caching/TTL policy
+
+/players (season stats): 12h
+
+/teams/statistics: 12h
+
+/standings: 30m
+
+/fixtures: 5m
+
+/fixtures/events: 30s
+
+/fixtures/lineups: 60m
+
+/leagues, /teams, /players?search=: 24h (IDs don’t change often)
+
+Modules you must implement
+
+apifootball/ApiFootballClient
+
+GET wrapper with Postgres snapshot TTL logic, SAFE_MODE, USE_SAMPLES_WHEN_MISSING.
+
+Creates/updates a provider_snapshot row per unique (endpoint, params_hash).
+
+Never throws on success; throws meaningful errors when SAFE_MODE blocks calls or network fails.
+
+stats/StatsService
+
+leaguesByCountry(country)
+
+teamsByLeague(leagueId, season)
+
+playersSearch(query)
+
+playerSeason(playerId, leagueId, season)
+
+teamSeason(teamId, leagueId, season)
+
+fixturesByDateTeam(dateISO, teamId)
+
+fixtureBundle(fixtureId) → { fx, ev, lu }
+
+content/PostComposerService
+
+Convert raw provider payloads into minimal facts JSON that’s safe for UI/AI.
+
+forPlayerSeason(raw) → { facts, sources }
+
+forTeamSeason(raw) → { facts, sources }
+
+forFixture(bundle) → { facts, sources }
+
+content/AiWriterService (stub)
+
+writeMatchArticle(facts, lang) → { title, markdown } (deterministic, no model yet)
+
+writeTeamPlayerSeasonProfile(teamFacts, playerFacts, lang) → { title, markdown }
+
+GraphQL schema/resolvers
+
+Queries:
+
+leaguesByCountry(country: String!)
+
+teamsByLeague(leagueId: ID!, season: Int!)
+
+playersSearch(q: String!)
+
+playerToday(playerId: ID!, leagueId: ID!, season: Int!) -> PlayerToday
+
+Mutations:
+
+generateMatchArticle(fixtureId: ID!, lang: Language!) -> GeneratedArticle
+
+generateTeamPlayerSeasonProfile(teamId: ID!, playerId: ID!, leagueId: ID!, season: Int!, lang: Language!) -> GeneratedArticle
+
+Acceptance criteria
+
+With SAFE_MODE=true + USE_SAMPLES_WHEN_MISSING=true, all queries/mutations return valid example data from samples/ without using the quota.
+
+With SAFE_MODE=false, calling the “example endpoints” (see bottom) performs minimal upstream requests and stores snapshots.
+
+Re‑invoking the same endpoint within TTL must not call upstream again.
+
+Error messages are actionable (e.g., recommend to disable SAFE_MODE or to place sample JSON at the right path).
+
+Deliverables
+
+All source files per the structure below
+
+A SQL migration for provider_snapshot
+
+A samples/ folder with realistic JSON stubs (players, team stats, fixture, events, lineups)
+
+A generated file example-endpoint-tests.txt with a bulleted list: each bullet has the request and a short example response (truncated), clearly marked whether it hits SAMPLES or LIVE.
+
+2) Directory structure & code blocks
+
+Create files like this (Codex should fill full implementations):
+
+src/
+  apifootball/
+    apifootball.client.ts
+  provider-cache/
+    entities/
+      provider-snapshot.entity.ts
+  stats/
+    stats.service.ts
+  content/
+    post-composer.service.ts
+    ai-writer.service.ts
+  graphql/
+    types.ts
+    resolvers/
+      content.resolver.ts
+      ids.resolver.ts
+  common/
+    env.ts
+    util/
+      hashParams.ts
+migrations/
+  1753000000000-ProviderSnapshot.ts
+samples/
+  players.playerSeason.json
+  teams.teamSeason.json
+  fixtures.fixture.json
+  fixtures.events.json
+  fixtures.lineups.json
+
+Migration
+// migrations/1753000000000-ProviderSnapshot.ts
+import { MigrationInterface, QueryRunner } from 'typeorm';
+
+export class ProviderSnapshot1753000000000 implements MigrationInterface {
+  name = 'ProviderSnapshot1753000000000';
+  public async up(q: QueryRunner): Promise<void> {
+    await q.query(`
+      CREATE TABLE IF NOT EXISTS provider_snapshot (
+        snapshot_id BIGSERIAL PRIMARY KEY,
+        provider TEXT NOT NULL,
+        endpoint TEXT NOT NULL,
+        params_hash TEXT NOT NULL,
+        params_json JSONB NOT NULL,
+        data_json JSONB NOT NULL,
+        ttl_sec INT NOT NULL DEFAULT 300,
+        fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(provider, endpoint, params_hash)
+      );
+    `);
+    await q.query(`
+      CREATE INDEX IF NOT EXISTS idx_ps_fetch ON provider_snapshot (provider, endpoint, params_hash);
+    `);
+  }
+  public async down(q: QueryRunner): Promise<void> {
+    await q.query(`DROP TABLE IF EXISTS provider_snapshot;`);
+  }
+}
+
+Entity
+// src/provider-cache/entities/provider-snapshot.entity.ts
+import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
+
+@Entity('provider_snapshot')
+@Index(['provider','endpoint','params_hash'], { unique: true })
+export class ProviderSnapshot {
+  @PrimaryGeneratedColumn('increment', { type: 'bigint' }) snapshot_id!: string;
+  @Column() provider!: string;
+  @Column() endpoint!: string;
+  @Column() params_hash!: string;
+  @Column({ type: 'jsonb' }) params_json!: any;
+  @Column({ type: 'jsonb' }) data_json!: any;
+  @Column({ type: 'int', default: 300 }) ttl_sec!: number;
+  @CreateDateColumn({ type: 'timestamptz' }) fetched_at!: Date;
+}
+
+Common helpers
+// src/common/util/hashParams.ts
+import crypto from 'crypto';
+export function hashParams(p: Record<string, any>) {
+  const sorted = Object.keys(p).sort().reduce((o,k)=> (o[k]=p[k], o), {} as Record<string,any>);
+  return crypto.createHash('sha1').update(JSON.stringify(sorted)).digest('hex');
+}
+
+// src/common/env.ts
+export const ENV = {
+  KEY: process.env.APIFOOTBALL_KEY!,
+  BASE: process.env.APIFOOTBALL_BASE || 'https://v3.football.api-sports.io',
+  SAFE_MODE: process.env.SAFE_MODE === 'true',
+  USE_SAMPLES: process.env.USE_SAMPLES_WHEN_MISSING === 'true',
+  LOG_PROVIDER_CALLS: process.env.LOG_PROVIDER_CALLS === 'true',
+};
+
+ApiFootball client with Postgres TTL and SAFE_MODE / SAMPLES
+// src/apifootball/apifootball.client.ts
+import axios from 'axios';
+import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { ProviderSnapshot } from '../provider-cache/entities/provider-snapshot.entity';
+import { hashParams } from '../common/util/hashParams';
+import { ENV } from '../common/env';
+import fs from 'fs';
+import path from 'path';
+
+const TTL: Record<string, number> = {
+  '/players': 60*60*12,
+  '/teams/statistics': 60*60*12,
+  '/standings': 60*30,
+  '/fixtures': 60*5,
+  '/fixtures/events': 30,
+  '/fixtures/lineups': 60*60,
+  '/leagues': 60*60*24,
+  '/teams': 60*60*24,
+};
+
+@Injectable()
+export class ApiFootballClient {
+  private http = axios.create({
+    baseURL: ENV.BASE,
+    headers: { 'x-apisports-key': ENV.KEY }
+  });
+
+  constructor(
+    @InjectRepository(ProviderSnapshot)
+    private repo: Repository<ProviderSnapshot>,
+  ) {}
+
+  private ttlFor(endpoint: string) {
+    return TTL[endpoint] ?? 300;
+  }
+
+  private isFresh(row: ProviderSnapshot) {
+    const freshUntil = new Date(row.fetched_at.getTime() + row.ttl_sec * 1000);
+    return freshUntil > new Date();
+  }
+
+  private samplePath(endpoint: string) {
+    const map: Record<string,string> = {
+      '/players': 'players.playerSeason.json',
+      '/teams/statistics': 'teams.teamSeason.json',
+      '/fixtures': 'fixtures.fixture.json',
+      '/fixtures/events': 'fixtures.events.json',
+      '/fixtures/lineups': 'fixtures.lineups.json',
+    };
+    return path.join(process.cwd(), 'samples', map[endpoint] || '');
+  }
+
+  async get<T>(endpoint: string, params: Record<string,any> = {}): Promise<T> {
+    const params_hash = hashParams(params);
+    const where = { provider: 'api-football', endpoint, params_hash };
+    const existed = await this.repo.findOne({ where });
+
+    if (existed && this.isFresh(existed)) return existed.data_json as T;
+
+    // SAFE_MODE and/or SAMPLES fallback
+    if (ENV.SAFE_MODE) {
+      if (ENV.USE_SAMPLES) {
+        const p = this.samplePath(endpoint);
+        if (p && fs.existsSync(p)) {
+          const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+          return data as T;
+        }
+      }
+      throw new Error(`[SAFE_MODE] No fresh snapshot for ${endpoint} ${JSON.stringify(params)}. Either place a sample file in /samples or set SAFE_MODE=false to allow live calls.`);
+    }
+
+    if (ENV.LOG_PROVIDER_CALLS) console.log(`[LIVE] GET ${endpoint} ${JSON.stringify(params)}`);
+    const { data } = await this.http.get<T>(endpoint, { params });
+
+    const row = this.repo.create({
+      provider: 'api-football',
+      endpoint,
+      params_hash,
+      params_json: params,
+      data_json: data,
+      ttl_sec: this.ttlFor(endpoint),
+      fetched_at: new Date(),
+    });
+    await this.repo.upsert(row, ['provider','endpoint','params_hash']);
+
+    return data;
+  }
+}
+
+Stats service
+// src/stats/stats.service.ts
+import { Injectable } from '@nestjs/common';
+import { ApiFootballClient } from '../apifootball/apifootball.client';
+
+@Injectable()
+export class StatsService {
+  constructor(private api: ApiFootballClient) {}
+
+  leaguesByCountry(country: string) {
+    return this.api.get('/leagues', { country });
+  }
+
+  teamsByLeague(leagueId: number, season: number) {
+    return this.api.get('/teams', { league: leagueId, season });
+  }
+
+  playersSearch(q: string) {
+    return this.api.get('/players', { search: q });
+  }
+
+  playerSeason(playerId: number, leagueId: number, season: number) {
+    return this.api.get('/players', { id: playerId, league: leagueId, season });
+  }
+
+  teamSeason(teamId: number, leagueId: number, season: number) {
+    return this.api.get('/teams/statistics', { team: teamId, league: leagueId, season });
+  }
+
+  fixturesByDateTeam(dateISO: string, teamId: number) {
+    return this.api.get('/fixtures', { date: dateISO, team: teamId });
+  }
+
+  async fixtureBundle(fixtureId: number) {
+    const [fx, ev, lu] = await Promise.all([
+      this.api.get('/fixtures', { id: fixtureId }),
+      this.api.get('/fixtures/events', { fixture: fixtureId }),
+      this.api.get('/fixtures/lineups', { fixture: fixtureId }),
+    ]);
+    return { fx, ev, lu };
+  }
+}
+
+Composer (facts → safe JSON)
+// src/content/post-composer.service.ts
+import { Injectable } from '@nestjs/common';
+
+@Injectable()
+export class PostComposerService {
+  forPlayerSeason(raw: any) {
+    const r = raw?.response?.[0];
+    const s = r?.statistics?.[0];
+    const facts = {
+      player: r?.player?.name || 'Unknown',
+      team: s?.team?.name || 'Unknown',
+      league: s?.league?.name || 'Unknown',
+      season: String(s?.league?.season ?? ''),
+      stats: {
+        goals: s?.goals?.total ?? 0,
+        assists: s?.goals?.assists ?? 0,
+        minutes: s?.games?.minutes ?? 0,
+        shots: s?.shots?.total ?? 0
+      }
+    };
+    return { facts, sources: ['api-football /players'] };
+  }
+
+  forTeamSeason(raw: any) {
+    const r = raw?.response;
+    const facts = {
+      team: r?.team?.name || 'Unknown',
+      league: r?.league?.name || 'Unknown',
+      season: String(r?.league?.season ?? ''),
+      matches: r?.fixtures?.played?.total ?? 0,
+      goalsFor: r?.goals?.for?.total?.total ?? 0,
+      goalsAgainst: r?.goals?.against?.total?.total ?? 0,
+    };
+    return { facts, sources: ['api-football /teams/statistics'] };
+  }
+
+  forFixture(bundle: any) {
+    const fx = bundle?.fx?.response?.[0];
+    const facts = {
+      match: {
+        home: fx?.teams?.home?.name || 'Home',
+        away: fx?.teams?.away?.name || 'Away',
+        score: `${fx?.goals?.home ?? 0}-${fx?.goals?.away ?? 0}`,
+        status: fx?.fixture?.status?.short || 'NS',
+        kickoff: fx?.fixture?.date || ''
+      },
+      // extend with summarized events/lineups if needed
+    };
+    return { facts, sources: ['api-football /fixtures', '/fixtures/events', '/fixtures/lineups'] };
+  }
+}
+
+AI writer (stub)
+// src/content/ai-writer.service.ts
+import { Injectable } from '@nestjs/common';
+
+@Injectable()
+export class AiWriterService {
+  writeMatchArticle(facts: any, lang: string) {
+    const { home, away, score } = facts.match;
+    const title = `${home} ${score} ${away} — Match Recap`;
+    const markdown = [
+      `# ${title}`,
+      ``,
+      `**Status:** ${facts.match.status} | **Kickoff:** ${facts.match.kickoff}`,
+      ``,
+      `## Summary`,
+      `${home} and ${away} finished ${score}. (Numbers are from API-Football; replace this with real AI later.)`,
+    ].join('\n');
+    return { title, markdown };
+  }
+
+  writeTeamPlayerSeasonProfile(teamFacts: any, playerFacts: any, lang: string) {
+    const title = `${playerFacts.player} & ${teamFacts.team}: Season ${teamFacts.season} snapshot`;
+    const md = [
+      `# ${title}`,
+      ``,
+      `**League:** ${teamFacts.league}`,
+      ``,
+      `## Team Snapshot`,
+      `- Matches: ${teamFacts.matches}`,
+      `- Goals For/Against: ${teamFacts.goalsFor}/${teamFacts.goalsAgainst}`,
+      ``,
+      `## Player: ${playerFacts.player}`,
+      `- Club: ${playerFacts.team}`,
+      `- Goals: ${playerFacts.stats.goals}`,
+      `- Assists: ${playerFacts.stats.assists}`,
+      `- Minutes: ${playerFacts.stats.minutes}`,
+      `- Shots: ${playerFacts.stats.shots}`,
+    ].join('\n');
+    return { title, markdown: md };
+  }
+}
+
+GraphQL types + resolvers
+// src/graphql/types.ts
+import { Field, ObjectType } from '@nestjs/graphql';
+
+@ObjectType()
+export class PlayerToday {
+  @Field() name!: string;
+  @Field() team!: string;
+  @Field() league!: string;
+  @Field() season!: string;
+  @Field() summary!: string; // "19 G, 12 A, 2400’"
+}
+
+@ObjectType()
+export class GeneratedArticle {
+  @Field() title!: string;
+  @Field() markdown!: string;
+  @Field() statsSnapshotJson!: String;
+}
+
+// src/graphql/resolvers/ids.resolver.ts
+import { Args, Query, Resolver } from '@nestjs/graphql';
+import { StatsService } from '../../stats/stats.service';
+
+@Resolver()
+export class IdsResolver {
+  constructor(private stats: StatsService) {}
+
+  @Query(() => String)
+  async leaguesByCountry(@Args('country') country: string): Promise<string> {
+    const raw = await this.stats.leaguesByCountry(country);
+    return JSON.stringify(raw); // return raw JSON string for now (dev convenience)
+  }
+
+  @Query(() => String)
+  async teamsByLeague(@Args('leagueId') leagueId: number, @Args('season') season: number): Promise<string> {
+    const raw = await this.stats.teamsByLeague(leagueId, season);
+    return JSON.stringify(raw);
+  }
+
+  @Query(() => String)
+  async playersSearch(@Args('q') q: string): Promise<string> {
+    const raw = await this.stats.playersSearch(q);
+    return JSON.stringify(raw);
+  }
+}
+
+// src/graphql/resolvers/content.resolver.ts
+import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { StatsService } from '../../stats/stats.service';
+import { PostComposerService } from '../../content/post-composer.service';
+import { AiWriterService } from '../../content/ai-writer.service';
+import { PlayerToday, GeneratedArticle } from '../types';
+
+@Resolver()
+export class ContentResolver {
+  constructor(
+    private stats: StatsService,
+    private composer: PostComposerService,
+    private ai: AiWriterService,
+  ) {}
+
+  @Query(() => PlayerToday)
+  async playerToday(
+    @Args('playerId') playerId: number,
+    @Args('leagueId') leagueId: number,
+    @Args('season') season: number,
+  ): Promise<PlayerToday> {
+    const raw = await this.stats.playerSeason(playerId, leagueId, season);
+    const { facts } = this.composer.forPlayerSeason(raw);
+    return {
+      name: facts.player,
+      team: facts.team,
+      league: facts.league,
+      season: facts.season,
+      summary: `${facts.stats.goals} G, ${facts.stats.assists} A, ${facts.stats.minutes}’`,
+    };
+    // keep the same facts around to feed your LLM mutation later
+  }
+
+  @Mutation(() => GeneratedArticle)
+  async generateTeamPlayerSeasonProfile(
+    @Args('teamId') teamId: number,
+    @Args('playerId') playerId: number,
+    @Args('leagueId') leagueId: number,
+    @Args('season') season: number,
+    @Args('lang') lang: string,
+  ): Promise<GeneratedArticle> {
+    const [teamRaw, playerRaw] = await Promise.all([
+      this.stats.teamSeason(teamId, leagueId, season),
+      this.stats.playerSeason(playerId, leagueId, season),
+    ]);
+    const teamFacts = this.composer.forTeamSeason(teamRaw).facts;
+    const playerFacts = this.composer.forPlayerSeason(playerRaw).facts;
+    const { title, markdown } = this.ai.writeTeamPlayerSeasonProfile(teamFacts, playerFacts, lang);
+    return { title, markdown, statsSnapshotJson: JSON.stringify({ teamFacts, playerFacts }) };
+  }
+
+  @Mutation(() => GeneratedArticle)
+  async generateMatchArticle(
+    @Args('fixtureId') fixtureId: number,
+    @Args('lang') lang: string,
+  ): Promise<GeneratedArticle> {
+    const bundle = await this.stats.fixtureBundle(fixtureId);
+    const { facts } = this.composer.forFixture(bundle);
+    const { title, markdown } = this.ai.writeMatchArticle(facts, lang);
+    return { title, markdown, statsSnapshotJson: JSON.stringify(facts) };
+  }
+}
+
+3) Implementation steps (follow this order to save quota)
+
+Create migration + entity for provider_snapshot; run migrations.
+
+Add env vars (APIFOOTBALL_KEY, SAFE_MODE=true, USE_SAMPLES_WHEN_MISSING=true, LOG_PROVIDER_CALLS=false).
+
+Create samples: put realistic JSON in samples/*.json (you can copy from docs/examples or your own prior calls).
+
+Implement ApiFootballClient with TTL + SAFE_MODE + SAMPLES (no external calls yet).
+
+Implement StatsService, Composer, AI Writer stub, GraphQL resolvers.
+
+Boot the app; run the example endpoints (below). They should work from samples (no quota used).
+
+When satisfied, set SAFE_MODE=false for a single live test:
+
+Fetch leaguesByCountry("Armenia") to discover league IDs (1 call).
+
+Fetch teamsByLeague(<leagueId>, <season>) (1 call).
+
+Fetch one playersSearch("De Bruyne") (1 call).
+
+Run playerToday with the chosen IDs (1 call).
+
+Optional: generateMatchArticle for one known fixtureId (3 calls: fixture, events, lineups).
+
+Verify snapshots were written and re‑run the same queries; ensure no new live calls within TTL.
+
+4) Example endpoints you can run (requests + expected shapes)
+
+All via /graphql POST. With SAFE_MODE=true + USE_SAMPLES_WHEN_MISSING=true, these return the sample JSON transformed by the composer.
+
+A) Discover leagues for Armenia (IDs discovery)
+
+Request
+
+{
+  "query": "query($country:String!){ leaguesByCountry(country:$country) }",
+  "variables": { "country": "Armenia" }
+}
+
+
+Response (shape)
+data.leaguesByCountry is a stringified JSON (for dev convenience). Expect it to include an array with league objects: [{ league:{ id, name }, country:{ name }, seasons:[{ season, ...}] }, ...].
+
+B) Teams in a league + season
+
+Request
+
+{
+  "query": "query($leagueId:ID!,$season:Int!){ teamsByLeague(leagueId:$leagueId, season:$season) }",
+  "variables": { "leagueId": 39, "season": 2025 }
+}
+
+
+Response (shape)
+data.teamsByLeague is a stringified JSON listing response: [{ team:{ id, name }, venue: {...} }, ...].
+
+C) Search players by name (pick an ID)
+
+Request
+
+{
+  "query": "query($q:String!){ playersSearch(q:$q) }",
+  "variables": { "q": "Kevin De Bruyne" }
+}
+
+
+Response (shape)
+data.playersSearch = stringified JSON, response: [{ player:{ id, name, nationality }, statistics:[...] }, ...]. Choose the matching playerId.
+
+D) Player today (season stat line)
+
+Request
+
+{
+  "query": "query($playerId:ID!,$leagueId:ID!,$season:Int!){ playerToday(playerId:$playerId, leagueId:$leagueId, season:$season){ name team league season summary } }",
+  "variables": { "playerId": 874, "leagueId": 39, "season": 2025 }
+}
+
+
+Response (shape)
+
+{
+  "data": {
+    "playerToday": {
+      "name": "Phil Foden",
+      "team": "Manchester City",
+      "league": "Premier League",
+      "season": "2025",
+      "summary": "19 G, 12 A, 2400’"
     }
   }
-- DO NOT rebuild posts “from scratch.” Analyze project files and extend them.
+}
 
-SECURITY / AUTH
-- Admin-only mutations. Use this token for protected requests during testing:
-  Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImFkbWluXzE3NTUyNzQ3MjE0MzQiLCJzdWIiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc1NTU5MTM3NywiZXhwIjoxNzU2MTk2MTc3fQ.wZYBCpzb02kuQ3--Gnw9beHkwhVBxF_XX_3IbHlHQbA
 
-REQUIREMENTS
+(Numbers come from samples/players.playerSeason.json in SAFE_MODE, or live if SAFE_MODE=false.)
 
-1) Codebase analysis
-   - Read src/posts (entities, DTOs, resolvers, services, migrations).
-   - Document current GraphQL schema for posts (queries/mutations/inputs) in the change log.
+E) Team + Player season profile (returns Markdown post)
 
-2) Data model extension (non-breaking)
-   - Introduce a new table **PostContent** with fields:
-     - id (PK)
-     - postId (FK → Post)
-     - language enum: HY | RU | EN
-     - title text, content text, tags text[]
-     - createdAt, updatedAt
-     - unique (postId, language)
-   - Keep existing Post fields intact (title/content/tags) for backward compatibility.
-   - Add a `baseLanguage` column on Post (HY|RU|EN) with a default (e.g., EN or derived from initial createPost input).
+Request
 
-3) Backfill / migration
-   - Create a TypeORM migration:
-     - Create PostContent (+ enum type) and unique index.
-     - If Post already has title/content/tags, migrate them into PostContent at (postId, baseLanguage).
-     - Keep Post.title/content/tags for now (resolve them from preferred/fallback language in resolvers).
+{
+  "query": "mutation($teamId:ID!,$playerId:ID!,$leagueId:ID!,$season:Int!,$lang:String!){ generateTeamPlayerSeasonProfile(teamId:$teamId, playerId:$playerId, leagueId:$leagueId, season:$season, lang:$lang){ title markdown statsSnapshotJson } }",
+  "variables": { "teamId": 50, "playerId": 874, "leagueId": 39, "season": 2025, "lang": "en" }
+}
 
-4) GraphQL schema (extend, don’t break)
-   - Keep the **existing createPost(input: ExistingCreatePostInput!)** behavior working with single-language fields.
-   - Extend the input with OPTIONAL multilingual fields:
-     - `baseLanguage?: Language`
-     - `contents?: [CreatePostContentInput!]` (each item: language, title, content, tags)
-   - If `contents` is provided, upsert per-language records into PostContent.
-   - If only legacy title/content/tags are provided (no `contents`), behave exactly as today (write Post fields + mirror into PostContent for baseLanguage).
-   - Add a new query arg `language?: Language` to `post(id:...)` and `posts(...)`:
-     - Resolve `servedLanguage` using preferred language with fallback order:
-       preferred → baseLanguage → EN → RU → HY.
-     - Expose a `contentResolved` field with the chosen language bundle.
 
-   Types (add/extend):
-   - enum Language { HY RU EN }
-   - type Post { postId, imageUrl, isTop, baseLanguage, servedLanguage, contentResolved: PostContent, contents: [PostContent!]! }
-   - type PostContent { id, language, title, content, tags }
-   - input CreatePostContentInput { language: Language!, title: String!, content: String!, tags: [String!]! }
-   - input CreatePostInput (extended): keep existing fields; add optional baseLanguage, contents
-   - input UpdatePostInput (extended): add optional contents: [UpsertPostContentInput!]
-   - input UpsertPostContentInput { language: Language!, title: String, content: String, tags: [String!] }
+Response (shape)
 
-5) Service / Resolver changes
-   - In createPost:
-     - Support legacy path (single-language) and mirror into PostContent for baseLanguage.
-     - Support new path (contents array) to create PostContent rows for HY/RU/EN as provided.
-   - In updatePost:
-     - Upsert specific languages in PostContent if `contents` present.
-   - In queries:
-     - Implement resolver logic that:
-       - Accepts `language?: Language`
-       - Computes `servedLanguage`
-       - Returns `contentResolved` accordingly.
-     - Keep legacy fields Post.title/content/tags by resolving from `contentResolved` to stay backward-compatible.
-
-6) Tests / verification
-   - After migration and code changes, **create a few mock posts** using the **existing createPost** mutation extended with `contents`.
-   - Also create one post using ONLY legacy fields (no contents) to confirm backward compatibility.
-   - Save the exact mutation payloads + full JSON responses to **./mock-posts.txt**.
-   - Verify queries with and without `language` arg and record responses.
-
-7) Logs / docs
-   - Create **./changes-languageSupport.txt** including:
-     - File-by-file change log (path, purpose, key code decisions).
-     - Summary of schema changes and migration details (including SQL emitted).
-     - Sample GraphQL `curl` commands (with Authorization header) to reproduce.
-     - Notes on fallback behavior and legacy compatibility.
-
-8) Acceptance
-   - Build passes, app runs.
-   - Existing createPost still works with old inputs.
-   - New multilingual path works; `contents` upserts languages.
-   - `post`/`posts` return `servedLanguage` and `contentResolved` correctly with fallback.
-   - Auth guards enforced: mutations require the provided token.
-
-GRAPHQL EXAMPLES (for mock-posts.txt; adjust IDs as returned)
-
-# Legacy-only (compat path)
-mutation LegacyCreate {
-  createPost(input: {
-    title: "Legacy Single-Language Post"
-    content: "Legacy body..."
-    tags: ["legacy","single-lang"]
-    imageUrl: "https://cdn.example.com/legacy.jpg"
-    isTop: false
-    # no contents[] here on purpose
-    baseLanguage: EN
-  }) {
-    postId
-    title
-    tags
-    baseLanguage
-    servedLanguage
-    contentResolved { language title tags }
+{
+  "data": {
+    "generateTeamPlayerSeasonProfile": {
+      "title": "Kevin De Bruyne & Manchester City: Season 2025 snapshot",
+      "markdown": "# Kevin De Bruyne & Manchester City: Season 2025 snapshot\n\n**League:** Premier League\n\n## Team Snapshot\n- Matches: 38\n- Goals For/Against: 90/30\n\n## Player: Kevin De Bruyne\n- Club: Manchester City\n- Goals: 9\n- Assists: 18\n- Minutes: 2300\n- Shots: 75",
+      "statsSnapshotJson": "{\"teamFacts\":{...},\"playerFacts\":{...}}"
+    }
   }
 }
 
-# Extended (multilingual path)
-mutation CreateMulti {
-  createPost(input: {
-    baseLanguage: HY
-    imageUrl: "https://cdn.example.com/mc-supercup.jpg"
-    isTop: true
-    # legacy fields may be omitted or filled; contents[] is the source of truth when present
-    contents: [
-      { language: HY, title: "Մանչեսթեր Սիթի՝ Սուպերգավաթի ճանապարհին", content: "# Սիթի\n\n**Ֆոդեն** ...", tags: ["մանչեսթեր սիթի","ֆոդեն","սուպերգավաթ"] },
-      { language: RU, title: "«Манчестер Сити» на пути к Суперкубку", content: "# Сити\n\n**Фоден** ...", tags: ["манчестер сити","фоден","суперкубок"] },
-      { language: EN, title: "Manchester City march toward the Super Cup", content: "# City\n\n**Foden** ...", tags: ["manchester city","foden","super cup"] }
-    ]
-  }) {
-    postId
-    baseLanguage
-    servedLanguage
-    contents { language title }
-    contentResolved { language title tags }
-  }
+
+F) Match article for a given fixtureId
+
+Request
+
+{
+  "query": "mutation($fixtureId:ID!,$lang:String!){ generateMatchArticle(fixtureId:$fixtureId, lang:$lang){ title markdown statsSnapshotJson } }",
+  "variables": { "fixtureId": 123456, "lang": "en" }
 }
 
-# Query with preferred language + fallback
-query OnePostInRU {
-  post(id: 1, language: RU) {
-    postId
-    servedLanguage
-    contentResolved { language title content tags }
+
+Response (shape)
+
+{
+  "data": {
+    "generateMatchArticle": {
+      "title": "Manchester City 2-1 Liverpool — Match Recap",
+      "markdown": "# Manchester City 2-1 Liverpool — Match Recap\n\n**Status:** FT | **Kickoff:** 2025-08-21T18:45:00Z\n\n## Summary\nManchester City and Liverpool finished 2-1. (Numbers are from API-Football; replace this with real AI later.)",
+      "statsSnapshotJson": "{\"match\":{\"home\":\"Manchester City\",\"away\":\"Liverpool\",\"score\":\"2-1\",\"status\":\"FT\",\"kickoff\":\"...\"}}"
+    }
   }
 }
-
-HEADERS for all mutations/queries (protected ops):
-  Content-Type: application/json
-  Authorization: Bearer <the provided token>
-
-DELIVERABLES
-- Code changes on branch feature/multilanguage-posts
-- TypeORM migration(s) applied
-- ./mock-posts.txt (inputs + outputs)
-- ./changes-languageSupport.txt (detailed log + curl commands)

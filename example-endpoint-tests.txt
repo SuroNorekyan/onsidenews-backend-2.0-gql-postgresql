@@ -1,0 +1,49 @@
+- Leagues (Armenia) [SAMPLES]
+  curl -s -X POST http://localhost:3000/graphql \
+    -H 'Content-Type: application/json' \
+    -d '{"query":"query($country:String!){ leaguesByCountry(country:$country) }","variables":{"country":"Armenia"}}'
+  Response (truncated): {"data":{"leaguesByCountry":"{\"response\":[{\"league\":{\"id\":501,\"name\":\"Armenian Premier League\"},...}]"}}
+
+- Teams by league/season [SAMPLES]
+  curl -s -X POST http://localhost:3000/graphql \
+    -H 'Content-Type: application/json' \
+    -d '{"query":"query($leagueId:ID!,$season:Int!){ teamsByLeague(leagueId:$leagueId, season:$season) }","variables":{"leagueId":39,"season":2025}}'
+  Response (truncated): {"data":{"teamsByLeague":"{\"response\":[{\"team\":{\"id\":50,\"name\":\"Manchester City\"}},{\"team\":{\"id\":49,\"name\":\"Chelsea\"}}]}"}}
+
+- Players search [SAMPLES]
+  curl -s -X POST http://localhost:3000/graphql \
+    -H 'Content-Type: application/json' \
+    -d '{"query":"query($q:String!){ playersSearch(q:$q) }","variables":{"q":"Kevin De Bruyne"}}'
+  Response (truncated): {"data":{"playersSearch":"{\"response\":[{\"player\":{\"id\":874,\"name\":\"Kevin De Bruyne\"},...}]}"}}
+
+- Player today [SAMPLES]
+  curl -s -X POST http://localhost:3000/graphql \
+    -H 'Content-Type: application/json' \
+    -d '{"query":"query($playerId:ID!,$leagueId:ID!,$season:Int!){ playerToday(playerId:$playerId, leagueId:$leagueId, season:$season){ name team league season summary } }","variables":{"playerId":874,"leagueId":39,"season":2025}}'
+  Response (truncated): {"data":{"playerToday":{"name":"Kevin De Bruyne","team":"Manchester City","league":"Premier League","season":2025,"summary":"Kevin De Bruyne | Manchester City | Premier League 2025"}}}
+
+- Team+Player season profile [SAMPLES]
+  curl -s -X POST http://localhost:3000/graphql \
+    -H 'Content-Type: application/json' \
+    -d '{"query":"mutation($teamId:ID!,$playerId:ID!,$leagueId:ID!,$season:Int!,$lang:String!){ generateTeamPlayerSeasonProfile(teamId:$teamId, playerId:$playerId, leagueId:$leagueId, season:$season, lang:$lang){ title markdown statsSnapshotJson } }","variables":{"teamId":50,"playerId":874,"leagueId":39,"season":2025,"lang":"en"}}'
+  Response (truncated): {"data":{"generateTeamPlayerSeasonProfile":{"title":"[en] Manchester City — Kevin De Bruyne (2025)","markdown":"# Manchester City 2025\n- League: Premier League\n- Player: Kevin De Bruyne (Belgium)\n- Fixtures (played): 3","statsSnapshotJson":"{\"teamStatsRes\":{...},\"playerRes\":{...}}"}}}
+
+- Match article (fixtureId) [SAMPLES]
+  curl -s -X POST http://localhost:3000/graphql \
+    -H 'Content-Type: application/json' \
+    -d '{"query":"mutation($fixtureId:ID!,$lang:String!){ generateMatchArticle(fixtureId:$fixtureId, lang:$lang){ title markdown statsSnapshotJson } }","variables":{"fixtureId":123456,"lang":"en"}}'
+  Response (truncated): {"data":{"generateMatchArticle":{"title":"[en] Manchester City vs Chelsea","markdown":"# Manchester City vs Chelsea\n## Goals\n- 23' Manchester City — Kevin De Bruyne\n- 51' Chelsea — Chelsea Player\n\n## Lineups\n- Manchester City (4-3-3)\n- Chelsea (4-2-3-1)","statsSnapshotJson":"{\"fixture\":{...},\"events\":{...},\"lineups\":{...}}"}}}
+
+- LIVE/CACHED round (IDs discovery) [NOTE]
+  Set SAFE_MODE=false, KEEP USE_SAMPLES_WHEN_MISSING=true.
+  Run twice within TTL to observe caching (second run CACHED, no provider log):
+  1) Leagues (Armenia) [LIVE]
+     curl -s -X POST http://localhost:3000/graphql \
+       -H 'Content-Type: application/json' \
+       -d '{"query":"query($country:String!){ leaguesByCountry(country:$country) }","variables":{"country":"Armenia"}}'
+     Response (truncated): {"data":{"leaguesByCountry":"{\"response\":[...]}"}}
+
+  2) Leagues (Armenia) again [CACHED]
+     (same curl)
+     Response (truncated): same as above; verify no LIVE provider call in logs.
+

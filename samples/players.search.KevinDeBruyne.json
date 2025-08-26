@@ -1,0 +1,11 @@
+{
+  "response": [
+    {
+      "player": { "id": 874, "name": "Kevin De Bruyne" },
+      "statistics": [
+        { "team": { "id": 50, "name": "Manchester City" }, "league": { "id": 39, "name": "Premier League", "season": 2025 } }
+      ]
+    }
+  ]
+}
+

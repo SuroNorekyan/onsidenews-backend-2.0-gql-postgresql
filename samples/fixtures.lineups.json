@@ -1,0 +1,19 @@
+{
+  "response": [
+    {
+      "team": { "id": 50, "name": "Manchester City" },
+      "formation": "4-3-3",
+      "coach": { "name": "Pep Guardiola" },
+      "startXI": [],
+      "substitutes": []
+    },
+    {
+      "team": { "id": 49, "name": "Chelsea" },
+      "formation": "4-2-3-1",
+      "coach": { "name": "Mauricio Pochettino" },
+      "startXI": [],
+      "substitutes": []
+    }
+  ]
+}
+

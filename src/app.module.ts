@@ -9,6 +9,10 @@ import { CommentsModule } from './comments/comments.module';
 import { AuthModule } from './auth/auth.module';
 import { TranslationService } from './common/services/translation.service';
 import './common/enums/sort-order.enum';
+import { GraphqlFeatureModule } from './graphql/graphql.module';
+import { ApiFootballModule } from './apifootball/apifootball.module';
+import { StatsModule } from './stats/stats.module';
+import { ContentModule } from './content/content.module';
 
 @Module({
   imports: [
@@ -42,6 +46,11 @@ import './common/enums/sort-order.enum';
     UsersModule,
     CommentsModule,
     AuthModule,
+    // New feature modules (non-breaking)
+    ApiFootballModule,
+    StatsModule,
+    ContentModule,
+    GraphqlFeatureModule,
   ],
   providers: [TranslationService],
   exports: [TranslationService],

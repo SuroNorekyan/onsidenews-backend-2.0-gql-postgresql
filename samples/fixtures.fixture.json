@@ -1,0 +1,13 @@
+{
+  "response": [
+    {
+      "fixture": { "id": 123456, "date": "2025-08-20T19:00:00Z", "status": { "short": "FT" } },
+      "teams": {
+        "home": { "id": 50, "name": "Manchester City", "winner": true },
+        "away": { "id": 49, "name": "Chelsea", "winner": false }
+      },
+      "goals": { "home": 2, "away": 1 }
+    }
+  ]
+}
+

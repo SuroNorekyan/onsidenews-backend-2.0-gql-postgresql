@@ -1,0 +1,9 @@
+{
+  "response": [
+    {
+      "league": { "id": 501, "name": "Armenian Premier League" },
+      "country": { "name": "Armenia", "code": "AM" }
+    }
+  ]
+}
+

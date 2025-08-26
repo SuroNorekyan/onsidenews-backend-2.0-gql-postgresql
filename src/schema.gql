@@ -57,6 +57,12 @@ input FilterPostsInput {
   title: String
 }
 
+type GeneratedArticle {
+  markdown: String!
+  statsSnapshotJson: String!
+  title: String!
+}
+
 enum LanguageCode {
   EN
   HY
@@ -76,10 +82,20 @@ type Mutation {
   deletePost(id: Int!): Boolean!
   deleteUser(id: Int!): Boolean!
   generate2FASecret: String!
+  generateMatchArticle(fixtureId: ID!, lang: String!): GeneratedArticle!
+  generateTeamPlayerSeasonProfile(lang: String!, leagueId: ID!, playerId: ID!, season: Int!, teamId: ID!): GeneratedArticle!
   likePost(postId: Int!, userId: Int!): Post!
   login(input: LoginInput!): AuthResponse!
   updatePost(id: Int!, input: UpdatePostInput!): Post!
   updateUser(input: UpdateUserInput!): User!
+}
+
+type PlayerToday {
+  league: String!
+  name: String!
+  season: Int
+  summary: String!
+  team: String!
 }
 
 type Post {
@@ -132,11 +148,15 @@ type Query {
   commentsByPost(postId: Int!): [Comment!]!
   commentsByUser(userId: Int!): [Comment!]!
   didYouMean(query: String!): String
+  leaguesByCountry(country: String!): String!
+  playerToday(leagueId: ID!, playerId: ID!, season: Int!): PlayerToday!
+  playersSearch(q: String!): String!
   post(id: Int!, language: LanguageCode): Post!
   posts(language: LanguageCode): [Post!]!
   postsInLangPaginated(language: LanguageCode, page: Int! = 1, pageSize: Int! = 12, sortByCreatedAt: SortOrder, sortByViews: SortOrder): PostsPage!
   postsPaginated(page: Int! = 1, pageSize: Int! = 12, sortByCreatedAt: SortOrder, sortByViews: SortOrder): PostsPage!
   searchPosts(filter: FilterPostsInput, language: LanguageCode): [Post!]!
+  teamsByLeague(leagueId: ID!, season: Int!): String!
   topPosts(language: LanguageCode, limit: Int! = 10, sortByCreatedAt: SortOrder): [Post!]!
   topPostsInLangPaginated(
     language: LanguageCode

@@ -1,0 +1,7 @@
+{
+  "response": [
+    { "team": { "id": 50, "name": "Manchester City" } },
+    { "team": { "id": 49, "name": "Chelsea" } }
+  ]
+}
+

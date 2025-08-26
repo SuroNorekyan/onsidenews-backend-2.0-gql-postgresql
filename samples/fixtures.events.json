@@ -1,0 +1,19 @@
+{
+  "response": [
+    {
+      "time": { "elapsed": 23 },
+      "team": { "id": 50, "name": "Manchester City" },
+      "player": { "id": 874, "name": "Kevin De Bruyne" },
+      "type": "Goal",
+      "detail": "Normal Goal"
+    },
+    {
+      "time": { "elapsed": 51 },
+      "team": { "id": 49, "name": "Chelsea" },
+      "player": { "id": 111, "name": "Chelsea Player" },
+      "type": "Goal",
+      "detail": "Normal Goal"
+    }
+  ]
+}
+
